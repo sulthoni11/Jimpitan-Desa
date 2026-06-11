@@ -14,113 +14,224 @@ interface JimpitanRecord {
   } | null
 }
 
+interface Rumah {
+  id: string
+  rt: string
+  no_rumah: string
+  nama_pemilik: string
+}
+
+const rts = ['RT 01', 'RT 02', 'RT 03', 'RT 04']
+
 /**
  * Mengekspor data jimpitan ke file Excel (.xlsx) dengan 2 sheet:
- * 1. Sheet "Rekap per RT" — ringkasan total uang dan rumah per RT
- * 2. Sheet "Detail Transaksi" — seluruh baris data transaksi
+ * 1. "Rekap per RT" — ringkasan per RT (total rumah, scan, belum scan, total uang)
+ * 2. "Rincian per RT" — daftar seluruh warga per RT, lengkap status bayar
  */
 export function exportJimpitanToExcel(
   records: JimpitanRecord[],
+  allHouses: Rumah[],
   filterDate: string,
   filterRt: string
 ) {
   const workbook = XLSX.utils.book_new()
+  const isSpecificDate = !!filterDate
+
+  // Helper: cari jimpitan record untuk rumah tertentu (filter berdasarkan tanggal jika ada)
+  const findRecord = (rumahId: string) => {
+    return records.find(r => r.rumah?.id === rumahId)
+  }
+
+  const filteredHouses = filterRt === 'Semua'
+    ? allHouses
+    : allHouses.filter(h => h.rt === filterRt)
 
   // =============================================
   // SHEET 1: Rekap per RT
   // =============================================
-  const rts = ['RT 01', 'RT 02', 'RT 03', 'RT 04']
-
   const rekapRows = rts.map((rt) => {
-    const rtRecords = records.filter((r) => r.rumah?.rt === rt)
+    const rtHouses = allHouses.filter(h => h.rt === rt)
+    const rtRecords = records.filter(r => r.rumah?.rt === rt)
+    const jumlahAda = rtRecords.filter(r => r.status === 'ada').length
+    const jumlahTidakAda = rtRecords.filter(r => r.status === 'tidak ada').length
+    const jumlahBelumScan = isSpecificDate
+      ? rtHouses.length - rtRecords.length
+      : 0
     const totalUang = rtRecords
-      .filter((r) => r.status === 'ada')
+      .filter(r => r.status === 'ada')
       .reduce((sum, r) => sum + Number(r.nominal), 0)
-    const jumlahAda = rtRecords.filter((r) => r.status === 'ada').length
-    const jumlahTidakAda = rtRecords.filter((r) => r.status === 'tidak ada').length
 
     return {
       'Rukun Tetangga': rt,
-      'Jumlah Scan': rtRecords.length,
-      'Uang Ada (Rumah)': jumlahAda,
-      'Tidak Ada (Rumah)': jumlahTidakAda,
-      'Total Uang Terkumpul (Rp)': totalUang,
+      'Total Rumah': rtHouses.length,
+      'Sudah Scan': rtRecords.length,
+      'Uang Ada': jumlahAda,
+      'Tidak Ada': jumlahTidakAda,
+      ...(isSpecificDate ? { 'Belum Scan': jumlahBelumScan } : {}),
+      'Total Uang (Rp)': totalUang,
     }
   })
 
-  // Tambahkan baris Total keseluruhan
-  const grandTotal = records
-    .filter((r) => r.status === 'ada')
+  const grandTotalAda = records.filter(r => r.status === 'ada').length
+  const grandTotalTidak = records.filter(r => r.status === 'tidak ada').length
+  const grandTotalUang = records
+    .filter(r => r.status === 'ada')
     .reduce((sum, r) => sum + Number(r.nominal), 0)
 
-  rekapRows.push({
+  const grandTotalRow: any = {
     'Rukun Tetangga': 'TOTAL KESELURUHAN',
-    'Jumlah Scan': records.length,
-    'Uang Ada (Rumah)': records.filter((r) => r.status === 'ada').length,
-    'Tidak Ada (Rumah)': records.filter((r) => r.status === 'tidak ada').length,
-    'Total Uang Terkumpul (Rp)': grandTotal,
-  })
+    'Total Rumah': allHouses.length,
+    'Sudah Scan': records.length,
+    'Uang Ada': grandTotalAda,
+    'Tidak Ada': grandTotalTidak,
+    ...(isSpecificDate ? { 'Belum Scan': allHouses.length - records.length } : {}),
+    'Total Uang (Rp)': grandTotalUang,
+  }
+  rekapRows.push(grandTotalRow)
 
   const rekapSheet = XLSX.utils.json_to_sheet(rekapRows)
-
-  // Atur lebar kolom rekap
   rekapSheet['!cols'] = [
-    { wch: 22 }, // Rukun Tetangga
-    { wch: 16 }, // Jumlah Scan
-    { wch: 20 }, // Uang Ada
-    { wch: 22 }, // Tidak Ada
-    { wch: 28 }, // Total Uang
+    { wch: 22 },
+    { wch: 14 },
+    { wch: 14 },
+    { wch: 14 },
+    { wch: 14 },
+    ...(isSpecificDate ? [{ wch: 14 }] : []),
+    { wch: 22 },
   ]
 
   XLSX.utils.book_append_sheet(workbook, rekapSheet, 'Rekap per RT')
 
   // =============================================
-  // SHEET 2: Detail Transaksi
+  // SHEET 2: Rincian per RT
   // =============================================
-  const detailRows = records.map((record, index) => {
-    const waktu = new Date(record.created_at).toLocaleTimeString('id-ID', {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
+  const detailRows: any[] = []
+  let noUrut = 0
+
+  rts.forEach((rt) => {
+    const rtHouses = filteredHouses
+      .filter(h => h.rt === rt)
+      .sort((a, b) => a.id.localeCompare(b.id))
+
+    if (rtHouses.length === 0) return
+
+    // Baris header RT
+    detailRows.push({
+      'No': '',
+      'RT': rt,
+      'No. Rumah': '',
+      'Nama Pemilik': '',
+      'Status': '',
+      'Nominal (Rp)': '',
     })
 
-    return {
-      'No': index + 1,
-      'Tanggal': record.tanggal,
-      'Jam Scan': waktu,
-      'ID Rumah': record.rumah?.id || '-',
-      'RT': record.rumah?.rt || '-',
-      'No. Rumah': record.rumah?.no_rumah || '-',
-      'Nama Pemilik': record.rumah?.nama_pemilik || '-',
-      'Status': record.status === 'ada' ? 'Ada' : 'Tidak Ada',
-      'Nominal (Rp)': record.status === 'ada' ? Number(record.nominal) : 0,
-    }
+    let subtotal = 0
+
+    rtHouses.forEach((house) => {
+      noUrut++
+      const rec = findRecord(house.id)
+
+      let status: string
+      let nominal: number
+
+      if (rec) {
+        status = rec.status === 'ada' ? 'Ada' : 'Tidak Ada'
+        nominal = rec.status === 'ada' ? Number(rec.nominal) : 0
+      } else {
+        status = 'Belum Scan'
+        nominal = 0
+      }
+
+      subtotal += nominal
+
+      detailRows.push({
+        'No': isSpecificDate ? noUrut : '',
+        'RT': '',
+        'No. Rumah': house.no_rumah,
+        'Nama Pemilik': house.nama_pemilik,
+        'Status': status,
+        'Nominal (Rp)': nominal,
+      })
+    })
+
+    // Subtotal RT
+    detailRows.push({
+      'No': '',
+      'RT': `SUBTOTAL ${rt}`,
+      'No. Rumah': '',
+      'Nama Pemilik': '',
+      'Status': '',
+      'Nominal (Rp)': subtotal,
+    })
+
+    // Baris kosong pemisah
+    detailRows.push({
+      'No': '',
+      'RT': '',
+      'No. Rumah': '',
+      'Nama Pemilik': '',
+      'Status': '',
+      'Nominal (Rp)': '',
+    })
+  })
+
+  // Grand total
+  const grandTotalRincian = allHouses
+    .filter(h => filterRt === 'Semua' || h.rt === filterRt)
+    .reduce((sum, house) => {
+      const rec = findRecord(house.id)
+      return sum + (rec && rec.status === 'ada' ? Number(rec.nominal) : 0)
+    }, 0)
+
+  detailRows.push({
+    'No': '',
+    'RT': 'TOTAL KESELURUHAN',
+    'No. Rumah': '',
+    'Nama Pemilik': '',
+    'Status': '',
+    'Nominal (Rp)': grandTotalRincian,
   })
 
   const detailSheet = XLSX.utils.json_to_sheet(detailRows)
 
-  // Atur lebar kolom detail
   detailSheet['!cols'] = [
-    { wch: 5  }, // No
-    { wch: 14 }, // Tanggal
-    { wch: 12 }, // Jam Scan
-    { wch: 14 }, // ID Rumah
-    { wch: 8  }, // RT
-    { wch: 12 }, // No. Rumah
-    { wch: 22 }, // Nama Pemilik
-    { wch: 12 }, // Status
-    { wch: 18 }, // Nominal
+    { wch: 6 },
+    { wch: 22 },
+    { wch: 14 },
+    { wch: 24 },
+    { wch: 14 },
+    { wch: 20 },
   ]
 
-  XLSX.utils.book_append_sheet(workbook, detailSheet, 'Detail Transaksi')
+  // Merge cell untuk header RT (kolom A-F)
+  const merges: XLSX.Range[] = []
+  let currentRow = 1 // 1-indexed, baris pertama data
 
-  // =============================================
-  // Tentukan nama file berdasarkan filter aktif
-  // =============================================
+  rts.forEach((rt) => {
+    const rtHouses = filteredHouses
+      .filter(h => h.rt === rt)
+      .sort((a, b) => a.id.localeCompare(b.id))
+
+    if (rtHouses.length === 0) return
+
+    // Header RT and its data rows + subtotal = 2 + rtHouses.length rows
+    const startRow = currentRow
+    const endRow = currentRow + 1 + rtHouses.length // header + data rows
+    merges.push({ s: { r: startRow, c: 0 }, e: { r: startRow, c: 5 } }) // merge header row
+
+    currentRow = endRow + 2 // +2 for subtotal + empty row
+  })
+
+  if (merges.length > 0) {
+    detailSheet['!merges'] = merges
+  }
+
+  XLSX.utils.book_append_sheet(workbook, detailSheet, 'Rincian per RT')
+
+  // Nama file
   const dateLabel = filterDate || 'semua-tanggal'
   const rtLabel = filterRt === 'Semua' ? 'semua-rt' : filterRt.replace(' ', '-').toLowerCase()
   const fileName = `jimpitan_${dateLabel}_${rtLabel}.xlsx`
 
-  // Unduh file
   XLSX.writeFile(workbook, fileName)
 }

@@ -125,12 +125,17 @@ export default function RiwayatPage() {
 
   // Handle export ke Excel
   const handleExport = async () => {
-    if (filteredRecords.length === 0) return
     setExporting(true)
     try {
-      // Gunakan setTimeout agar UI sempat menampilkan loading state
+      // Ambil semua data rumah untuk keperluan rekap "Belum Scan"
+      const { data: allHouses } = await supabase
+        .from('rumah')
+        .select('id, rt, no_rumah, nama_pemilik')
+
+      if (!allHouses || allHouses.length === 0) return
+
       await new Promise(resolve => setTimeout(resolve, 100))
-      exportJimpitanToExcel(filteredRecords, filterDate, filterRt)
+      exportJimpitanToExcel(filteredRecords, allHouses, filterDate, filterRt)
     } catch (err) {
       console.error('Gagal mengekspor Excel:', err)
     } finally {
@@ -290,25 +295,21 @@ export default function RiwayatPage() {
             {/* Tombol Export Excel */}
             <button
               onClick={handleExport}
-              disabled={exporting || filteredRecords.length === 0 || loading}
-              title={filteredRecords.length === 0 ? 'Tidak ada data untuk diekspor' : 'Export ke Excel'}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '8px 14px',
-                borderRadius: 'var(--border-radius-md)',
-                background: filteredRecords.length === 0
-                  ? 'rgba(255,255,255,0.03)'
-                  : 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
-                border: filteredRecords.length === 0
-                  ? '1px solid var(--glass-border)'
-                  : '1px solid rgba(22, 163, 74, 0.4)',
-                color: filteredRecords.length === 0 ? 'var(--text-muted)' : '#fff',
-                fontWeight: 600,
-                fontSize: '0.8rem',
-                cursor: filteredRecords.length === 0 ? 'not-allowed' : 'pointer',
-                boxShadow: filteredRecords.length > 0 ? '0 4px 12px rgba(22, 163, 74, 0.3)' : 'none',
+                disabled={exporting || loading}
+                title="Export ke Excel"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '8px 14px',
+                  borderRadius: 'var(--border-radius-md)',
+                  background: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
+                  border: '1px solid rgba(22, 163, 74, 0.4)',
+                  color: '#fff',
+                  fontWeight: 600,
+                  fontSize: '0.8rem',
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 12px rgba(22, 163, 74, 0.3)',
                 transition: 'var(--transition-fast)',
                 whiteSpace: 'nowrap',
                 height: '36px',
