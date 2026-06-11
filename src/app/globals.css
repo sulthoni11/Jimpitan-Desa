@@ -208,6 +208,15 @@ p {
   background-position: right 16px center;
   background-size: 18px;
   padding-right: 40px;
+  color-scheme: dark;
+}
+
+/* Fix dropdown option list agar terlihat di browser Windows */
+.form-select option {
+  background-color: #1b233a;
+  color: #f9fafb;
+  padding: 8px 12px;
+  font-size: 1rem;
 }
 
 /* Status Radio/Toggle Button */
@@ -367,3 +376,22 @@ p {
 .success-text { color: var(--success); }
 .danger-text { color: var(--danger); }
 .warning-text { color: var(--warning); }
+
+/* Responsive: layar sangat kecil (HP < 400px) */
+@media (max-width: 400px) {
+  .app-content {
+    padding: 16px 14px;
+    gap: 14px;
+  }
+  .app-header {
+    padding: 18px 14px 14px;
+  }
+  .glass-card {
+    padding: 16px;
+    border-radius: var(--border-radius-md);
+  }
+  h1 { font-size: 1.5rem; }
+  h2 { font-size: 1.1rem; }
+  .btn { padding: 12px 18px; font-size: 0.9rem; }
+  .form-input { padding: 12px 14px; }
+}
