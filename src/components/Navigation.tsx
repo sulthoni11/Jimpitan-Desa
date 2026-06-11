@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, QrCode, History, Printer } from 'lucide-react'
+import { LayoutDashboard, QrCode, History, Printer, UserPlus } from 'lucide-react'
 
 export default function Navigation() {
   const pathname = usePathname()
@@ -18,9 +18,14 @@ export default function Navigation() {
       href: '/',
     },
     {
-      label: 'Scan QR',
+      label: 'Scan',
       icon: QrCode,
       href: '/scan',
+    },
+    {
+      label: 'Tambah',
+      icon: UserPlus,
+      href: '/tambah',
     },
     {
       label: 'QR Code',
