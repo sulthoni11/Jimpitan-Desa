@@ -32,27 +32,6 @@ export default function TambahWargaPage() {
     fetchUser()
   }, [supabase, router])
 
-  const generateNextId = async (selectedRt: string): Promise<string> => {
-    const rtNumber = selectedRt.replace('RT ', '')
-    const prefix = `RMH-${rtNumber}-`
-
-    const { data } = await supabase
-      .from('rumah')
-      .select('id')
-      .like('id', `${prefix}%`)
-      .order('id', { ascending: false })
-      .limit(1)
-
-    if (!data || data.length === 0) {
-      return `${prefix}001`
-    }
-
-    const lastId = data[0].id
-    const lastSeq = parseInt(lastId.slice(-3), 10)
-    const nextSeq = (lastSeq + 1).toString().padStart(3, '0')
-    return `${prefix}${nextSeq}`
-  }
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!noRumah.trim() || !namaPemilik.trim()) return
@@ -62,20 +41,24 @@ export default function TambahWargaPage() {
     setSuccess(null)
 
     try {
-      const newId = await generateNextId(rt)
-
-      const { error: insertError } = await supabase
-        .from('rumah')
-        .insert({
-          id: newId,
+      const res = await fetch('/api/rumah', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           rt,
           no_rumah: noRumah.trim(),
           nama_pemilik: namaPemilik.trim(),
-        })
+        }),
+      })
 
-      if (insertError) throw new Error(insertError.message)
+      const result = await res.json()
 
-      setSuccess({ id: newId, rt, no_rumah: noRumah.trim(), nama_pemilik: namaPemilik.trim() })
+      if (!res.ok) {
+        throw new Error(result.error || 'Gagal menambahkan data warga.')
+      }
+
+      const newRumah = result.data
+      setSuccess({ id: newRumah.id, rt: newRumah.rt, no_rumah: newRumah.no_rumah, nama_pemilik: newRumah.nama_pemilik })
       setNoRumah('')
       setNamaPemilik('')
     } catch (err: any) {
