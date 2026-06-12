@@ -11,6 +11,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    // Hanya petugas tertentu yang bisa tambah warga
+    const email = user.email?.toLowerCase() || ''
+    if (email !== 'petugas1@jimpitan.com' && email !== 'maryonotoha@gmail.com') {
+      return NextResponse.json({ error: 'Anda tidak memiliki izin untuk menambah warga.' }, { status: 403 })
+    }
+
     const { rt, no_rumah, nama_pemilik } = await request.json()
 
     if (!rt || !no_rumah || !nama_pemilik) {

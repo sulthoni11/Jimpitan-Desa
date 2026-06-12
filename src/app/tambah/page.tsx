@@ -16,6 +16,7 @@ export default function TambahWargaPage() {
   const supabase = createClient()
 
   const [petugas, setPetugas] = useState<any>(null)
+  const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null)
   const [rt, setRt] = useState('RT 01')
   const [noRumah, setNoRumah] = useState('')
   const [namaPemilik, setNamaPemilik] = useState('')
@@ -27,7 +28,11 @@ export default function TambahWargaPage() {
     const fetchUser = async () => {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) router.push('/login')
-      else setPetugas(user)
+      else {
+        setPetugas(user)
+        const email = user.email?.toLowerCase() || ''
+        setIsAuthorized(email === 'petugas1@jimpitan.com' || email === 'maryonotoha@gmail.com')
+      }
     }
     fetchUser()
   }, [supabase, router])
@@ -102,7 +107,24 @@ export default function TambahWargaPage() {
           </div>
         )}
 
-        {!success ? (
+        {isAuthorized === false && (
+          <div className="glass-card text-center" style={{ padding: '40px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+            <div style={{
+              width: '64px', height: '64px', borderRadius: '50%',
+              background: 'var(--danger-light)', border: '2px solid var(--danger)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center'
+            }}>
+              <AlertCircle size={32} color="var(--danger)" />
+            </div>
+            <h2 style={{ color: 'var(--danger)' }}>Akses Dibatasi</h2>
+            <p className="muted">
+              Fitur tambah warga hanya untuk petugas tertentu.
+              <br />Hubungi admin jika perlu akses.
+            </p>
+          </div>
+        )}
+
+        {isAuthorized === true && !success && (
           <form onSubmit={handleSubmit} className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <div className="form-group" style={{ marginBottom: 0 }}>
               <label className="form-label">Rukun Tetangga (RT)</label>
@@ -173,7 +195,9 @@ export default function TambahWargaPage() {
               {loading ? 'Menyimpan...' : 'Simpan Warga Baru'}
             </button>
           </form>
-        ) : (
+        )}
+
+        {isAuthorized === true && success && (
           <div className="glass-card text-center animate-fade-in" style={{ padding: '32px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px' }}>
             <div style={{
               width: '72px', height: '72px', borderRadius: '50%',
