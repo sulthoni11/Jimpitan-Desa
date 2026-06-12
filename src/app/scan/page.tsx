@@ -450,6 +450,34 @@ export default function ScanPage() {
               </div>
             </div>
 
+            {/* Info Periode Pembayaran */}
+            {(() => {
+              const tgl = new Date().getDate()
+              const dalamPeriode = tgl >= 1 && tgl <= 15
+              return (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: '8px',
+                  padding: '12px 14px',
+                  borderRadius: 'var(--border-radius-md)',
+                  background: dalamPeriode ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                  border: `1px solid ${dalamPeriode ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)'}`,
+                  color: dalamPeriode ? 'var(--success)' : 'var(--danger)',
+                  fontSize: '0.8rem', fontWeight: 600
+                }}>
+                  <div style={{
+                    width: '8px', height: '8px', borderRadius: '50%',
+                    background: dalamPeriode ? 'var(--success)' : 'var(--danger)',
+                    flexShrink: 0
+                  }} />
+                  <span>
+                    {dalamPeriode
+                      ? 'Periode pembayaran dibuka (tanggal 1-15)'
+                      : 'Periode pembayaran ditutup (kembali lagi tanggal 1 bulan depan)'}
+                  </span>
+                </div>
+              )
+            })()}
+
             {/* Status Pembayaran */}
             {paymentStatus && (
               <div style={{
