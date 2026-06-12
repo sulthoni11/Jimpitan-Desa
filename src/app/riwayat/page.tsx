@@ -22,9 +22,9 @@ export default function RiwayatPage() {
   const [error, setError] = useState<string | null>(null)
 
   // Filter States
-  const [filterDate, setFilterDate] = useState<string>(
-    new Date().toLocaleDateString('en-CA') // Default hari ini (format YYYY-MM-DD)
-  )
+  const now = new Date()
+  const [filterBulan, setFilterBulan] = useState<number>(now.getMonth() + 1)
+  const [filterTahun, setFilterTahun] = useState<number>(now.getFullYear())
   const [filterRt, setFilterRt] = useState<string>('Semua')
 
   // Ambil data petugas yang login
@@ -40,19 +40,24 @@ export default function RiwayatPage() {
     fetchUser()
   }, [supabase, router])
 
+  const bulanNames = [
+    'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+    'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+  ]
+
   // Fungsi untuk mengambil data riwayat dari database
   const fetchHistory = useCallback(async () => {
     setLoading(true)
     setError(null)
 
     try {
-      let query = supabase
-        .from('jimpitan')
+      const { data, error: fetchError } = await supabase
+        .from('pembayaran')
         .select(`
           id,
-          tanggal,
+          bulan,
+          tahun,
           nominal,
-          status,
           created_at,
           petugas_id,
           rumah:rumah_id (
@@ -62,25 +67,20 @@ export default function RiwayatPage() {
             nama_pemilik
           )
         `)
+        .eq('bulan', filterBulan)
+        .eq('tahun', filterTahun)
         .order('created_at', { ascending: false })
-
-      // Filter tanggal di level database jika diisi
-      if (filterDate) {
-        query = query.eq('tanggal', filterDate)
-      }
-
-      const { data, error: fetchError } = await query
 
       if (fetchError) throw fetchError
       
       setRecords(data || [])
     } catch (err: any) {
       console.error('Error fetching history:', err)
-      setError('Gagal memuat data riwayat jimpitan.')
+      setError('Gagal memuat data riwayat pembayaran.')
     } finally {
       setLoading(false)
     }
-  }, [supabase, filterDate])
+  }, [supabase, filterBulan, filterTahun])
 
   // Muat data saat tanggal filter berubah atau petugas terkonfirmasi
   useEffect(() => {
@@ -115,12 +115,9 @@ export default function RiwayatPage() {
 
   const summary = getFilteredSummary()
 
-  // Format tanggal untuk tampilan UI
-  const formatDisplayDate = (dateStr: string) => {
-    if (!dateStr) return 'Semua Tanggal'
-    const date = new Date(dateStr)
-    const options: Intl.DateTimeFormatOptions = { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }
-    return date.toLocaleDateString('id-ID', options)
+  // Format bulan/tahun untuk tampilan UI
+  const formatDisplayDate = () => {
+    return `${bulanNames[filterBulan - 1]} ${filterTahun}`
   }
 
   // Handle export ke Excel
@@ -142,7 +139,8 @@ export default function RiwayatPage() {
         .eq('tahun', tahunIni)
 
       await new Promise(resolve => setTimeout(resolve, 100))
-      exportJimpitanToExcel(filteredRecords, allHouses, filterDate, filterRt, pembayaran || undefined)
+      const dateLabel = `${filterTahun}-${String(filterBulan).padStart(2, '0')}`
+      exportJimpitanToExcel(filteredRecords, allHouses, dateLabel, filterRt, pembayaran || undefined)
     } catch (err) {
       console.error('Gagal mengekspor Excel:', err)
     } finally {
@@ -162,7 +160,7 @@ export default function RiwayatPage() {
       {/* Header Halaman */}
       <header className="app-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <h2>Riwayat Jimpitan</h2>
+          <h2>Riwayat Pembayaran</h2>
         </div>
         {petugas && (
           <button 
@@ -191,34 +189,50 @@ export default function RiwayatPage() {
         <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
             <Filter size={18} color="var(--accent)" />
-            <h3 style={{ fontSize: '0.95rem', color: 'var(--text-primary)' }}>Filter Pencarian</h3>
+            <h3 style={{ fontSize: '0.95rem', color: 'var(--text-primary)' }}>Filter Pembayaran</h3>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '12px' }}>
-            {/* Input Tanggal */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
+            {/* Select Bulan */}
             <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label" style={{ fontSize: '0.75rem' }}>Tanggal</label>
-              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                <input
-                  type="date"
-                  value={filterDate}
-                  onChange={(e) => setFilterDate(e.target.value)}
-                  className="form-input"
-                  style={{ width: '100%', paddingLeft: '12px', fontSize: '0.9rem' }}
-                />
-              </div>
+              <label className="form-label" style={{ fontSize: '0.75rem' }}>Bulan</label>
+              <select
+                value={filterBulan}
+                onChange={(e) => setFilterBulan(Number(e.target.value))}
+                className="form-input form-select"
+                style={{ width: '100%', fontSize: '0.85rem' }}
+              >
+                {bulanNames.map((name, i) => (
+                  <option key={i + 1} value={i + 1}>{name}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Select Tahun */}
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label" style={{ fontSize: '0.75rem' }}>Tahun</label>
+              <select
+                value={filterTahun}
+                onChange={(e) => setFilterTahun(Number(e.target.value))}
+                className="form-input form-select"
+                style={{ width: '100%', fontSize: '0.85rem' }}
+              >
+                {[filterTahun - 1, filterTahun, filterTahun + 1].map(t => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
             </div>
 
             {/* Select RT */}
             <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label" style={{ fontSize: '0.75rem' }}>Rukun Tetangga</label>
+              <label className="form-label" style={{ fontSize: '0.75rem' }}>RT</label>
               <select
                 value={filterRt}
                 onChange={(e) => setFilterRt(e.target.value)}
                 className="form-input form-select"
-                style={{ width: '100%', fontSize: '0.9rem' }}
+                style={{ width: '100%', fontSize: '0.85rem' }}
               >
-                <option value="Semua">Semua RT</option>
+                <option value="Semua">Semua</option>
                 <option value="RT 01">RT 01</option>
                 <option value="RT 02">RT 02</option>
                 <option value="RT 03">RT 03</option>
@@ -226,16 +240,6 @@ export default function RiwayatPage() {
               </select>
             </div>
           </div>
-
-          {filterDate && (
-            <button 
-              onClick={() => setFilterDate('')}
-              className="btn btn-secondary"
-              style={{ padding: '6px 12px', fontSize: '0.75rem', alignSelf: 'flex-end', marginTop: '4px' }}
-            >
-              Tampilkan Semua Tanggal
-            </button>
-          )}
         </div>
 
         {/* Error Alert */}
@@ -272,7 +276,7 @@ export default function RiwayatPage() {
 
           {/* Card Total Rumah */}
           <div className="glass-card" style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <span className="muted" style={{ fontSize: '0.75rem', fontWeight: 600 }}>TOTAL SCAN</span>
+            <span className="muted" style={{ fontSize: '0.75rem', fontWeight: 600 }}>TOTAL RUMAH</span>
             <p className="bold" style={{ fontSize: '1.25rem', color: 'var(--text-primary)' }}>
               {summary.totalCount} Rumah
             </p>
@@ -284,7 +288,7 @@ export default function RiwayatPage() {
           <p className="muted" style={{ fontSize: '0.8rem' }}>
             Menampilkan data untuk: <br />
             <span className="bold" style={{ color: 'var(--text-primary)' }}>
-              {formatDisplayDate(filterDate)}
+              {formatDisplayDate()}
             </span>
           </p>
           <div style={{ display: 'flex', gap: '8px' }}>
@@ -340,7 +344,7 @@ export default function RiwayatPage() {
             <div className="glass-card text-center muted" style={{ padding: '40px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
               <FileText size={32} style={{ opacity: 0.5, color: 'var(--accent)' }} />
               <p className="bold" style={{ color: 'var(--text-primary)' }}>Tidak Ada Data</p>
-              <p style={{ fontSize: '0.85rem' }}>Tidak ditemukan catatan jimpitan pada filter yang dipilih.</p>
+              <p style={{ fontSize: '0.85rem' }}>Tidak ditemukan pembayaran pada bulan yang dipilih.</p>
             </div>
           ) : (
             filteredRecords.map((record) => {
@@ -362,8 +366,8 @@ export default function RiwayatPage() {
                     </div>
                     
                     <div style={{ textAlign: 'right' }}>
-                      <span className={`badge ${record.status === 'ada' ? 'badge-success' : 'badge-danger'}`} style={{ fontSize: '0.8rem', fontWeight: 700 }}>
-                        {record.status === 'ada' ? `Rp ${Number(record.nominal).toLocaleString('id-ID')}` : 'Tidak Ada'}
+                      <span className="badge badge-success" style={{ fontSize: '0.8rem', fontWeight: 700 }}>
+                        Rp {Number(record.nominal).toLocaleString('id-ID')}
                       </span>
                     </div>
                   </div>
@@ -371,12 +375,10 @@ export default function RiwayatPage() {
                   <hr style={{ border: 'none', borderBottom: '1px solid var(--glass-border)', margin: '10px 0' }} />
                   
                   <div className="flex-space" style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                    <span>Jam: {timeStr} WIB</span>
-                    {record.tanggal !== filterDate && (
-                      <span>Tgl: {record.tanggal}</span>
-                    )}
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px', maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      <User size={10} /> {record.petugas_id ? 'Petugas' : 'Sistem'}
+                    <span>{timeStr} WIB</span>
+                    <span>{bulanNames[record.bulan - 1]} {record.tahun}</span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <User size={10} /> Petugas
                     </span>
                   </div>
                 </div>
