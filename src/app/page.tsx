@@ -244,6 +244,40 @@ export default function DashboardPage() {
           </div>
         )}
 
+        {/* Info Periode Pembayaran */}
+        {(() => {
+          const tgl = new Date().getDate()
+          const dalamPeriode = tgl >= 1 && tgl <= 15
+          const sisaHari = 15 - tgl + 1
+          return (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: '10px',
+              padding: '14px 16px',
+              borderRadius: 'var(--border-radius-md)',
+              background: dalamPeriode ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+              border: `1px solid ${dalamPeriode ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)'}`,
+            }}>
+              <div style={{
+                width: '10px', height: '10px', borderRadius: '50%',
+                background: dalamPeriode ? 'var(--success)' : 'var(--danger)',
+                flexShrink: 0, boxShadow: `0 0 8px ${dalamPeriode ? 'var(--success)' : 'var(--danger)'}`
+              }} />
+              <div style={{ fontSize: '0.85rem' }}>
+                <p className="bold" style={{ color: dalamPeriode ? 'var(--success)' : 'var(--danger)' }}>
+                  {dalamPeriode
+                    ? `Periode tagihan dibuka — sisa ${sisaHari} hari`
+                    : 'Periode tagihan ditutup (buka lagi tgl 1)'}
+                </p>
+                <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                  {dalamPeriode
+                    ? `Tanggal 1-15 setiap bulan. Segera tagih warga yang belum bayar!`
+                    : 'Kembali tagih pada tanggal 1 bulan depan.'}
+                </p>
+              </div>
+            </div>
+          )
+        })()}
+
         {/* Card Ringkasan Rupiah */}
         <div className="glass-card" style={{
           background: 'linear-gradient(135deg, rgba(124, 58, 237, 0.15) 0%, rgba(18, 24, 41, 0.8) 100%)',
