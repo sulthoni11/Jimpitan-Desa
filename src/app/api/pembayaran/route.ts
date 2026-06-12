@@ -32,39 +32,32 @@ export async function POST(request: NextRequest) {
     .from('pembayaran')
     .select('*')
     .eq('rumah_id', rumah_id)
+    .order('tahun', { ascending: false })
+    .order('bulan', { ascending: false })
 
   const paidSet = new Set((existing || []).map(p => `${p.bulan}-${p.tahun}`))
 
-  // Generate daftar bulan dari Januari tahun lalu sampai Desember tahun depan
-  const allMonths: { bulan: number; tahun: number }[] = []
-  for (let y = currentYear - 1; y <= currentYear + 1; y++) {
-    for (let m = 1; m <= 12; m++) {
-      if (y === currentYear - 1 && m < 1) continue
-      if (y === currentYear + 1 && m > 12) continue
-      allMonths.push({ bulan: m, tahun: y })
+  // Cari bulan pertama yang belum dibayar (mulai dari bulan ini ke depan)
+  const unpaidMonths: { bulan: number; tahun: number }[] = []
+  let y = currentYear
+  let m = currentMonth
+
+  for (let i = 0; i < 24; i++) { // max 24 bulan ke depan
+    if (!paidSet.has(`${m}-${y}`)) {
+      unpaidMonths.push({ bulan: m, tahun: y })
     }
+    m++
+    if (m > 12) { m = 1; y++ }
   }
-
-  // Urutkan: bulan tertua dulu
-  const sortedMonths = allMonths.sort((a, b) => a.tahun - b.tahun || a.bulan - b.bulan)
-
-  // Cari bulan yang belum dibayar (prioritas: bulan lalu → bulan ini → bulan depan)
-  const unpaidMonths = sortedMonths.filter(m => !paidSet.has(`${m.bulan}-${m.tahun}`))
-
-  // Potong hanya bulan2 yang relevan: dari bulan tertunggak sampai Desember tahun depan
-  const startIdx = unpaidMonths.findIndex(m => 
-    m.tahun > currentYear - 2 || (m.tahun === currentYear - 1 && m.bulan >= 1)
-  )
-  const relevantUnpaid = unpaidMonths.slice(Math.max(0, startIdx))
 
   // Distribusi nominal
   let sisa = nominal
   const created: { bulan: number; tahun: number; nominal: number }[] = []
 
-  for (const m of relevantUnpaid) {
+  for (const bulan of unpaidMonths) {
     if (sisa < NOMINAL_PER_BULAN) break
     sisa -= NOMINAL_PER_BULAN
-    created.push({ bulan: m.bulan, tahun: m.tahun, nominal: NOMINAL_PER_BULAN })
+    created.push({ bulan: bulan.bulan, tahun: bulan.tahun, nominal: NOMINAL_PER_BULAN })
   }
 
   if (created.length === 0) {

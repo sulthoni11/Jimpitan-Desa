@@ -19,37 +19,39 @@ export async function GET(request: NextRequest) {
   const currentMonth = now.getMonth() + 1
   const currentYear = now.getFullYear()
 
-  // Ambil semua pembayaran rumah ini
+  // Ambil semua pembayaran rumah ini, urut terbaru dulu
   const { data: payments } = await admin
     .from('pembayaran')
     .select('*')
     .eq('rumah_id', rumahId)
-    .order('tahun', { ascending: true })
-    .order('bulan', { ascending: true })
+    .order('tahun', { ascending: false })
+    .order('bulan', { ascending: false })
 
-  // Generate daftar bulan dari Januari tahun lalu sampai bulan ini
-  const allMonths: { bulan: number; tahun: number }[] = []
-  const startMonth = 1
-  const startYear = currentYear - 1
-  for (let y = startYear; y <= currentYear; y++) {
-    const monthEnd = y === currentYear ? currentMonth : 12
-    for (let m = (y === startYear ? startMonth : 1); m <= monthEnd; m++) {
-      allMonths.push({ bulan: m, tahun: y })
-    }
-  }
-
-  // Map pembayaran ke bulan
   const paidSet = new Set((payments || []).map(p => `${p.bulan}-${p.tahun}`))
 
-  // Cari tunggakan (bulan belum bayar, sebelum/sejak Jan tahun ini)
-  const tunggakan = allMonths.filter(m => {
-    if (m.tahun === currentYear && m.bulan > currentMonth) return false
-    return !paidSet.has(`${m.bulan}-${m.tahun}`)
-  })
-
   // Status bulan ini
-  const bulanIni = tunggakan.find(m => m.bulan === currentMonth && m.tahun === currentYear)
-  const sudahBayarBulanIni = !bulanIni
+  const sudahBayarBulanIni = paidSet.has(`${currentMonth}-${currentYear}`)
+
+  // Hitung tunggakan alami (bukan dari history buatan):
+  // Jika ada pembayaran terakhir di bulan X, dan ada bulan kosong setelahnya sampai bulan ini
+  const tunggakan: { bulan: number; tahun: number }[] = []
+
+  if (payments && payments.length > 0) {
+    // Ambil pembayaran terakhir
+    const lastPay = payments[0]
+
+    // Cari bulan2 kosong antara lastPay + 1 bulan sampai currentMonth - 1
+    let y = lastPay.tahun
+    let m = lastPay.bulan + 1
+
+    while (y < currentYear || (y === currentYear && m <= currentMonth - 1)) {
+      if (!paidSet.has(`${m}-${y}`)) {
+        tunggakan.push({ bulan: m, tahun: y })
+      }
+      m++
+      if (m > 12) { m = 1; y++ }
+    }
+  }
 
   // Total tunggakan
   const totalTunggakan = tunggakan.length * 10000
@@ -59,7 +61,7 @@ export async function GET(request: NextRequest) {
     currentMonth,
     currentYear,
     sudahBayarBulanIni,
-    tunggakan: tunggakan.map(m => ({ bulan: m.bulan, tahun: m.tahun })),
+    tunggakan,
     totalTunggakan,
   })
 }
