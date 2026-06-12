@@ -57,45 +57,37 @@ export default function DashboardPage() {
   // Fungsi untuk memuat data statistik dashboard
   const fetchDashboardData = useCallback(async () => {
     setError(null)
-    const todayStr = new Date().toLocaleDateString('en-CA') // YYYY-MM-DD local
+    const now = new Date()
+    const currentMonth = now.getMonth() + 1
+    const currentYear = now.getFullYear()
 
     try {
       // 1. Ambil data semua rumah untuk dasar perhitungan
       const { data: allHouses, error: housesError } = await supabase
         .from('rumah')
-        .select('id, rt')
+        .select('id, rt, no_rumah, nama_pemilik')
 
       if (housesError) throw housesError
       const houses = allHouses || []
 
-      // 2. Ambil data jimpitan hari ini
-      // Join dengan tabel rumah untuk mendapatkan RT jimpitan tersebut
-      const { data: todayJimpitans, error: jimpitanError } = await supabase
-        .from('jimpitan')
-        .select(`
-          id,
-          nominal,
-          status,
-          created_at,
-          rumah:rumah_id (
-            id,
-            rt,
-            no_rumah,
-            nama_pemilik
-          )
-        `)
-        .eq('tanggal', todayStr)
+      // 2. Ambil data pembayaran bulan ini
+      const { data: bulanIni, error: payError } = await supabase
+        .from('pembayaran')
+        .select('id, rumah_id, nominal, created_at')
+        .eq('bulan', currentMonth)
+        .eq('tahun', currentYear)
 
-      if (jimpitanError) throw jimpitanError
-      const jimpitans = (todayJimpitans as any[]) || []
+      if (payError) throw payError
+      const payments = (bulanIni as any[]) || []
+
+      // Map rumah_id ke pembayaran
+      const paidHouseIds = new Set(payments.map(p => p.rumah_id))
 
       // 3. Hitung Ringkasan Utama (Summary Stats)
-      const totalAmount = jimpitans
-        .filter(j => j.status === 'ada')
-        .reduce((sum, j) => sum + Number(j.nominal), 0)
+      const totalAmount = payments.reduce((sum, p) => sum + Number(p.nominal), 0)
 
       const totalHouses = houses.length
-      const scannedHouses = jimpitans.length
+      const scannedHouses = paidHouseIds.size
       const unscannedHouses = Math.max(0, totalHouses - scannedHouses)
 
       setSummary({
@@ -108,37 +100,37 @@ export default function DashboardPage() {
       // 4. Hitung Statistik per RT (RT 01 sampai RT 04)
       const rts = ['RT 01', 'RT 02', 'RT 03', 'RT 04']
       const calculatedRtSummary: RtStats[] = rts.map(rt => {
-        // Cari rumah di RT ini
         const rtHouses = houses.filter(h => h.rt === rt)
-        const rtHousesIds = rtHouses.map(h => h.id)
-        
-        // Cari jimpitan hari ini untuk rumah di RT ini
-        const rtJimpitans = jimpitans.filter(j => j.rumah && j.rumah.rt === rt)
+        const rtHouseIds = rtHouses.map(h => h.id)
 
-        const rtAmount = rtJimpitans
-          .filter(j => j.status === 'ada')
-          .reduce((sum, j) => sum + Number(j.nominal), 0)
+        const rtPayments = payments.filter(p => rtHouseIds.includes(p.rumah_id))
+        const rtAmount = rtPayments.reduce((sum, p) => sum + Number(p.nominal), 0)
 
         return {
           rt,
           amount: rtAmount,
           totalHouses: rtHouses.length,
-          scannedHouses: rtJimpitans.length
+          scannedHouses: rtPayments.length
         }
       })
 
       setRtSummary(calculatedRtSummary)
 
-      // 5. Muat Aktivitas Scan Terbaru Hari Ini (Limit 5)
-      // Urutkan berdasarkan waktu scan terbaru
-      const sortedJimpitans = [...jimpitans].sort(
+      // 5. Aktivitas Pembayaran Terbaru (Limit 5)
+      const sortedPayments = [...payments].sort(
         (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       )
-      setRecentScans(sortedJimpitans.slice(0, 5))
+
+      // Gabungkan dengan data rumah
+      const recentScansWithRumah = sortedPayments.slice(0, 5).map(p => {
+        const rumah = houses.find(h => h.id === p.rumah_id)
+        return { ...p, rumah }
+      })
+      setRecentScans(recentScansWithRumah)
 
     } catch (err: any) {
       console.error('Error fetching dashboard data:', err)
-      setError('Gagal memuat rekap jimpitan hari ini.')
+      setError('Gagal memuat rekap pembayaran.')
     }
   }, [supabase])
 
@@ -269,7 +261,7 @@ export default function DashboardPage() {
           }}>
             <Coins size={24} />
           </div>
-          <p className="muted" style={{ fontSize: '0.85rem', fontWeight: 600, letterSpacing: '0.05em' }}>TOTAL JIMPITAN HARI INI</p>
+          <p className="muted" style={{ fontSize: '0.85rem', fontWeight: 600, letterSpacing: '0.05em' }}>TOTAL IURAN BULAN INI</p>
           <h1 style={{ 
             fontSize: '2.5rem', 
             fontWeight: 800, 
@@ -281,7 +273,7 @@ export default function DashboardPage() {
             Rp {summary.totalAmount.toLocaleString('id-ID')}
           </h1>
           <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-            Kas terhimpun dari rumah dengan status &quot;Uang Ada&quot;
+            Iuran jimpitan bulan ini
           </p>
         </div>
 
@@ -364,19 +356,19 @@ export default function DashboardPage() {
           gap: '8px',
           boxShadow: '0 8px 24px var(--accent-glow)'
         }}>
-          Mulai Scan Rumah Baru <ArrowRight size={18} />
+          Mulai Tagih Bulan Ini <ArrowRight size={18} />
         </Link>
 
         {/* Pencatatan Terbaru */}
         <div className="glass-card">
           <h3 className="mb-4" style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
-            Aktivitas Scan Hari Ini
+            Pembayaran Bulan Ini
           </h3>
 
           {recentScans.length === 0 ? (
             <div className="text-center muted" style={{ padding: '20px 0', fontSize: '0.85rem' }}>
               <Clock size={24} style={{ margin: '0 auto 8px auto', opacity: 0.5 }} />
-              Belum ada pencatatan hari ini.
+              Belum ada pembayaran bulan ini.
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -407,8 +399,8 @@ export default function DashboardPage() {
                     </div>
                     
                     <div style={{ textAlign: 'right' }}>
-                      <span className={`badge ${scan.status === 'ada' ? 'badge-success' : 'badge-danger'}`} style={{ fontSize: '0.7rem' }}>
-                        {scan.status === 'ada' ? `Rp ${Number(scan.nominal).toLocaleString('id-ID')}` : 'Tidak Ada'}
+                      <span className="badge badge-success" style={{ fontSize: '0.7rem' }}>
+                        Rp {Number(scan.nominal).toLocaleString('id-ID')}
                       </span>
                     </div>
                   </div>
