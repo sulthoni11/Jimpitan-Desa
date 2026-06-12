@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/utils/supabase/client'
 import dynamic from 'next/dynamic'
 import { 
-  Camera, MapPin, User, Calendar, Coins, 
+  Camera, MapPin, User, Calendar,
   CheckCircle2, AlertCircle, RefreshCw, LogOut, ArrowLeft 
 } from 'lucide-react'
 
@@ -43,8 +43,9 @@ export default function ScanPage() {
   const [step, setStep] = useState<'scan' | 'form' | 'success'>('scan')
   const [rumahId, setRumahId] = useState<string>('')
   const [rumahData, setRumahData] = useState<any>(null)
-  const [nominal, setNominal] = useState<number>(1000)
-  const [status, setStatus] = useState<'ada' | 'tidak ada'>('ada')
+  const [paymentStatus, setPaymentStatus] = useState<any>(null)
+  const [nominal, setNominal] = useState<number>(10000)
+  const [result, setResult] = useState<any>(null)
   // scanKey dipakai sebagai React key pada QrScanner agar
   // komponen dihancurkan & dibuat ulang setiap kali scan baru dimulai
   const [scanKey, setScanKey] = useState(0)
@@ -70,11 +71,25 @@ export default function ScanPage() {
     fetchUser()
   }, [supabase, router])
 
-  // Ambil data rumah setelah scan berhasil
+  // Ambil data rumah setelah scan berhasil + cek status pembayaran
+  const goToForm = async (data: any) => {
+    setRumahData(data)
+    setRumahId(data.id)
+
+    try {
+      const res = await fetch(`/api/pembayaran/status?rumah_id=${data.id}`)
+      const statusData = await res.json()
+      setPaymentStatus(statusData)
+    } catch {
+      setPaymentStatus(null)
+    }
+
+    setStep('form')
+  }
+
   const handleScanSuccess = async (decodedText: string) => {
     setLoading(true)
     setError(null)
-    setRumahId(decodedText)
     
     try {
       const { data, error: fetchError } = await supabase
@@ -87,8 +102,7 @@ export default function ScanPage() {
         throw new Error('Data rumah tidak ditemukan. Pastikan QR Code valid.')
       }
 
-      setRumahData(data)
-      setStep('form')
+      await goToForm(data)
     } catch (err: any) {
       setError(err.message || 'Gagal memuat data rumah.')
     } finally {
@@ -119,11 +133,9 @@ export default function ScanPage() {
         throw new Error(`Rumah dengan ID "${constructedId}" tidak ditemukan. Pastikan RT dan nomor rumah benar.`)
       }
 
-      setRumahId(data.id)
-      setRumahData(data)
       setManualNo('')
       setManualMode(false)
-      setStep('form')
+      await goToForm(data)
     } catch (err: any) {
       setError(err.message || 'Gagal mencari data rumah.')
     } finally {
@@ -138,38 +150,32 @@ export default function ScanPage() {
     router.refresh()
   }
 
-  // Handle simpan jimpitan (Menggunakan UPSERT agar jika dobel scan di hari yang sama akan terupdate)
+  // Handle pembayaran (via API route)
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!petugas || !rumahId) return
 
     setLoading(true)
     setError(null)
-
-    // Jika status "tidak ada", nominal otomatis 0
-    const finalNominal = status === 'tidak ada' ? 0 : nominal
-    const todayStr = new Date().toLocaleDateString('en-CA') // Format YYYY-MM-DD (sesuai timezone lokal)
+    setResult(null)
 
     try {
-      const { error: insertError } = await supabase
-        .from('jimpitan')
-        .upsert({
-          rumah_id: rumahId,
-          tanggal: todayStr,
-          nominal: finalNominal,
-          status: status,
-          petugas_id: petugas.id
-        }, {
-          onConflict: 'rumah_id,tanggal'
-        })
+      const res = await fetch('/api/pembayaran', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rumah_id: rumahId, nominal }),
+      })
 
-      if (insertError) {
-        throw new Error(insertError.message)
+      const data = await res.json()
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Gagal memproses pembayaran.')
       }
 
+      setResult(data)
       setStep('success')
     } catch (err: any) {
-      setError(err.message || 'Gagal menyimpan data jimpitan.')
+      setError(err.message || 'Gagal memproses pembayaran.')
     } finally {
       setLoading(false)
     }
@@ -181,8 +187,9 @@ export default function ScanPage() {
     setStep('scan')
     setRumahId('')
     setRumahData(null)
-    setStatus('ada')
-    setNominal(1000)
+    setPaymentStatus(null)
+    setNominal(10000)
+    setResult(null)
     setError(null)
     setManualMode(false)
     setManualRt('RT 01')
@@ -211,7 +218,7 @@ export default function ScanPage() {
           )}
           <h2>
             {step === 'scan' && (manualMode ? 'Input Manual' : 'Scan QR Code')}
-            {step === 'form' && 'Catat Jimpitan'}
+            {step === 'form' && 'Pembayaran Jimpitan'}
             {step === 'success' && 'Berhasil'}
           </h2>
         </div>
@@ -415,7 +422,7 @@ export default function ScanPage() {
           </div>
         )}
 
-        {/* STEP 2: FORM INPUT JIMPITAN */}
+        {/* STEP 2: FORM PEMBAYARAN */}
         {step === 'form' && rumahData && (
           <form onSubmit={handleSubmit} className="glass-card animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             
@@ -443,9 +450,54 @@ export default function ScanPage() {
               </div>
             </div>
 
+            {/* Status Pembayaran */}
+            {paymentStatus && (
+              <div style={{
+                background: paymentStatus.sudahBayarBulanIni && paymentStatus.tunggakan.length === 0
+                  ? 'rgba(16, 185, 129, 0.1)'
+                  : 'rgba(245, 158, 11, 0.1)',
+                borderRadius: 'var(--border-radius-md)',
+                padding: '14px 16px',
+                border: `1px solid ${
+                  paymentStatus.sudahBayarBulanIni && paymentStatus.tunggakan.length === 0
+                    ? 'rgba(16, 185, 129, 0.2)'
+                    : 'rgba(245, 158, 11, 0.2)'
+                }`,
+              }}>
+                <div className="flex-space mb-4">
+                  <span className="muted" style={{ fontSize: '0.75rem', fontWeight: 600 }}>
+                    STATUS BULAN INI
+                  </span>
+                  <span className={`badge ${paymentStatus.sudahBayarBulanIni ? 'badge-success' : 'badge-warning'}`}>
+                    {paymentStatus.sudahBayarBulanIni ? 'LUNAS' : 'BELUM BAYAR'}
+                  </span>
+                </div>
+
+                {paymentStatus.tunggakan.length > 0 && (
+                  <div style={{ fontSize: '0.8rem', color: 'var(--warning)' }}>
+                    <p className="bold" style={{ marginBottom: '4px' }}>
+                      Tunggakan: {paymentStatus.tunggakan.length} bulan
+                    </p>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.75rem' }}>
+                      {paymentStatus.tunggakan.map((m: any) => `${m.bulan}/${m.tahun}`).join(', ')}
+                    </p>
+                    <p className="bold" style={{ marginTop: '4px', color: 'var(--warning)' }}>
+                      Total tunggakan: Rp {paymentStatus.totalTunggakan.toLocaleString('id-ID')}
+                    </p>
+                  </div>
+                )}
+
+                {paymentStatus.sudahBayarBulanIni && paymentStatus.tunggakan.length === 0 && (
+                  <p style={{ fontSize: '0.8rem', color: 'var(--success)' }}>
+                    Semua lancar! Tidak ada tunggakan.
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* Info Tanggal */}
             <div className="form-group">
-              <label className="form-label">Tanggal Pencatatan</label>
+              <label className="form-label">Tanggal Pembayaran</label>
               <div style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -462,65 +514,42 @@ export default function ScanPage() {
               </div>
             </div>
 
-            {/* Status Jimpitan (Radio Option) */}
-            <div className="form-group">
-              <label className="form-label">Status Jimpitan</label>
-              <div className="status-container">
-                <div className="status-option">
-                  <input
-                    type="radio"
-                    id="status-ada"
-                    name="status"
-                    checked={status === 'ada'}
-                    onChange={() => setStatus('ada')}
-                  />
-                  <label htmlFor="status-ada" className="status-label status-ada">
-                    Uang Ada
-                  </label>
-                </div>
-                <div className="status-option">
-                  <input
-                    type="radio"
-                    id="status-tidak"
-                    name="status"
-                    checked={status === 'tidak ada'}
-                    onChange={() => setStatus('tidak ada')}
-                  />
-                  <label htmlFor="status-tidak" className="status-label status-tidak">
-                    Tidak Ada / Kosong
-                  </label>
-                </div>
+            {/* Nominal Pembayaran */}
+            <div className="form-group animate-fade-in">
+              <label className="form-label" htmlFor="nominal">
+                Nominal Pembayaran (Rp)
+              </label>
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '6px' }}>
+                Minimal Rp 10.000/bulan. Bayar lebih untuk lunasi tunggakan atau bulan berikutnya.
+              </p>
+              <div style={{ position: 'relative' }}>
+                <span style={{
+                  position: 'absolute',
+                  left: '16px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: 'var(--text-secondary)',
+                  fontWeight: 600
+                }}>Rp</span>
+                <input
+                  id="nominal"
+                  type="number"
+                  value={nominal}
+                  onChange={(e) => setNominal(Math.max(10000, parseInt(e.target.value) || 10000))}
+                  className="form-input"
+                  style={{ paddingLeft: '44px', width: '100%' }}
+                  min="10000"
+                  step="10000"
+                  required
+                  disabled={loading}
+                />
               </div>
+              {nominal > 10000 && (
+                <p style={{ fontSize: '0.75rem', color: 'var(--accent)', marginTop: '4px' }}>
+                  Rp {(nominal - 10000).toLocaleString('id-ID')} akan dialokasikan ke tunggakan/bulan berikutnya
+                </p>
+              )}
             </div>
-
-            {/* Nominal Jimpitan */}
-            {status === 'ada' && (
-              <div className="form-group animate-fade-in">
-                <label className="form-label" htmlFor="nominal">Nominal Jimpitan (Rp)</label>
-                <div style={{ position: 'relative' }}>
-                  <span style={{
-                    position: 'absolute',
-                    left: '16px',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    color: 'var(--text-secondary)',
-                    fontWeight: 600
-                  }}>Rp</span>
-                  <input
-                    id="nominal"
-                    type="number"
-                    value={nominal}
-                    onChange={(e) => setNominal(Math.max(0, parseInt(e.target.value) || 0))}
-                    className="form-input"
-                    style={{ paddingLeft: '44px', width: '100%' }}
-                    min="0"
-                    step="500"
-                    required
-                    disabled={loading}
-                  />
-                </div>
-              </div>
-            )}
 
             {/* Error Message */}
             {error && (
@@ -557,14 +586,14 @@ export default function ScanPage() {
                 style={{ flex: 2 }}
                 disabled={loading}
               >
-                {loading ? 'Menyimpan...' : 'Simpan Data'}
+                {loading ? 'Memproses...' : `Bayar Rp ${nominal.toLocaleString('id-ID')}`}
               </button>
             </div>
           </form>
         )}
 
         {/* STEP 3: SUCCESS FEEDBACK */}
-        {step === 'success' && (
+        {step === 'success' && result && (
           <div className="glass-card text-center animate-fade-in" style={{ padding: '40px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px' }}>
             <div style={{
               width: '72px',
@@ -581,9 +610,9 @@ export default function ScanPage() {
             </div>
             
             <div>
-              <h2 className="success-text" style={{ marginBottom: '8px' }}>Pencatatan Berhasil</h2>
+              <h2 className="success-text" style={{ marginBottom: '8px' }}>Pembayaran Berhasil</h2>
               <p className="muted">
-                Data jimpitan rumah <span className="bold" style={{ color: 'var(--text-primary)' }}>{rumahData?.rt} - {rumahData?.no_rumah}</span> ({rumahData?.nama_pemilik}) telah disimpan.
+                {rumahData?.rt} - {rumahData?.no_rumah} ({rumahData?.nama_pemilik})
               </p>
             </div>
 
@@ -593,23 +622,21 @@ export default function ScanPage() {
               padding: '16px',
               width: '100%',
               border: '1px solid var(--glass-border)',
-              display: 'grid',
-              gridTemplateColumns: '1fr 1fr',
-              gap: '12px',
-              textAlign: 'left'
+              textAlign: 'left',
             }}>
-              <div>
-                <p className="muted" style={{ fontSize: '0.75rem' }}>STATUS</p>
-                <p className="bold" style={{ color: status === 'ada' ? 'var(--success)' : 'var(--danger)' }}>
-                  {status === 'ada' ? 'Uang Ada' : 'Tidak Ada'}
-                </p>
+              <p className="muted" style={{ fontSize: '0.75rem', marginBottom: '8px' }}>BULAN YANG TERBAYAR:</p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                {result.data?.map((d: any, i: number) => (
+                  <span key={i} className="badge badge-success" style={{ fontSize: '0.8rem' }}>
+                    {d.bulan}/{d.tahun}
+                  </span>
+                ))}
               </div>
-              <div>
-                <p className="muted" style={{ fontSize: '0.75rem' }}>NOMINAL</p>
-                <p className="bold" style={{ color: 'var(--text-primary)' }}>
-                  Rp {(status === 'ada' ? nominal : 0).toLocaleString('id-ID')}
+              {result.sisa > 0 && (
+                <p style={{ fontSize: '0.8rem', color: 'var(--accent)', marginTop: '8px' }}>
+                  Sisa: Rp {result.sisa.toLocaleString('id-ID')} (belum cukup untuk 1 bulan)
                 </p>
-              </div>
+              )}
             </div>
 
             <button 

@@ -127,15 +127,22 @@ export default function RiwayatPage() {
   const handleExport = async () => {
     setExporting(true)
     try {
-      // Ambil semua data rumah untuk keperluan rekap "Belum Scan"
+      // Ambil semua data rumah
       const { data: allHouses } = await supabase
         .from('rumah')
         .select('id, rt, no_rumah, nama_pemilik')
 
       if (!allHouses || allHouses.length === 0) return
 
+      // Ambil data pembayaran tahun ini untuk rekap tahunan
+      const tahunIni = new Date().getFullYear()
+      const { data: pembayaran } = await supabase
+        .from('pembayaran')
+        .select('*')
+        .eq('tahun', tahunIni)
+
       await new Promise(resolve => setTimeout(resolve, 100))
-      exportJimpitanToExcel(filteredRecords, allHouses, filterDate, filterRt)
+      exportJimpitanToExcel(filteredRecords, allHouses, filterDate, filterRt, pembayaran || undefined)
     } catch (err) {
       console.error('Gagal mengekspor Excel:', err)
     } finally {

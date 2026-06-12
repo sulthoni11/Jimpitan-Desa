@@ -21,18 +21,33 @@ interface Rumah {
   nama_pemilik: string
 }
 
+interface PembayaranRecord {
+  id: string
+  rumah_id: string
+  bulan: number
+  tahun: number
+  nominal: number
+}
+
 const rts = ['RT 01', 'RT 02', 'RT 03', 'RT 04']
 
+const bulanNames = [
+  'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+  'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+]
+
 /**
- * Mengekspor data jimpitan ke file Excel (.xlsx) dengan 2 sheet:
- * 1. "Rekap per RT" — ringkasan per RT (total rumah, scan, belum scan, total uang)
+ * Mengekspor data jimpitan ke file Excel (.xlsx) dengan 3 sheet:
+ * 1. "Rekap per RT" — ringkasan per RT
  * 2. "Rincian per RT" — daftar seluruh warga per RT, lengkap status bayar
+ * 3. "Rekap Tahunan" — matriks rumah × bulan (Jan-Des) per RT
  */
 export function exportJimpitanToExcel(
   records: JimpitanRecord[],
   allHouses: Rumah[],
   filterDate: string,
-  filterRt: string
+  filterRt: string,
+  pembayaran?: PembayaranRecord[]
 ) {
   const workbook = XLSX.utils.book_new()
   const isSpecificDate = !!filterDate
@@ -227,6 +242,103 @@ export function exportJimpitanToExcel(
   }
 
   XLSX.utils.book_append_sheet(workbook, detailSheet, 'Rincian per RT')
+
+  // =============================================
+  // SHEET 3: Rekap Tahunan (jika ada data pembayaran)
+  // =============================================
+  if (pembayaran && pembayaran.length > 0) {
+    const tahun = new Date().getFullYear()
+    const pembayaranFiltered = filterRt === 'Semua'
+      ? pembayaran
+      : pembayaran.filter(p => {
+          const house = allHouses.find(h => h.id === p.rumah_id)
+          return house?.rt === filterRt
+        })
+
+    const housesInView = filteredHouses.filter(h =>
+      filterRt === 'Semua' || h.rt === filterRt
+    )
+
+    // Bangun matriks: baris = rumah, kolom = bulan
+    const yearlyRows: any[] = []
+
+    rts.forEach(rt => {
+      const rtHouses = housesInView
+        .filter(h => h.rt === rt)
+        .sort((a, b) => a.id.localeCompare(b.id))
+
+      if (rtHouses.length === 0) return
+
+      // Header RT
+      yearlyRows.push({
+        'RT': rt,
+        'Nama Pemilik': '',
+        'No. Rumah': '',
+        ...Object.fromEntries(bulanNames.map((_, i) => [`Bulan ${i + 1}`, ''])),
+        'Total Bayar': '',
+      })
+
+      rtHouses.forEach(house => {
+        const row: any = {
+          'RT': '',
+          'Nama Pemilik': house.nama_pemilik,
+          'No. Rumah': house.no_rumah,
+        }
+
+        let totalBayar = 0
+        for (let b = 1; b <= 12; b++) {
+          const pay = pembayaranFiltered.find(
+            p => p.rumah_id === house.id && p.bulan === b && p.tahun === tahun
+          )
+          const isPaid = !!pay
+          row[`Bulan ${b}`] = isPaid ? 'LUNAS' : ''
+          if (isPaid) totalBayar += Number(pay.nominal)
+        }
+
+        row['Total Bayar'] = totalBayar
+        yearlyRows.push(row)
+      })
+
+      // Subtotal RT
+      yearlyRows.push({
+        'RT': `SUBTOTAL ${rt}`,
+        'Nama Pemilik': '',
+        'No. Rumah': '',
+        ...Object.fromEntries(bulanNames.map((_, i) => {
+          const count = rtHouses.filter(h =>
+            pembayaranFiltered.some(p => p.rumah_id === h.id && p.bulan === i + 1 && p.tahun === tahun)
+          ).length
+          return [`Bulan ${i + 1}`, `${count} rmh`]
+        })),
+        'Total Bayar': rtHouses.reduce((sum, h) => {
+          const pays = pembayaranFiltered.filter(
+            p => p.rumah_id === h.id && p.tahun === tahun
+          )
+          return sum + pays.reduce((s, p) => s + Number(p.nominal), 0)
+        }, 0),
+      })
+
+      // Baris kosong
+      yearlyRows.push({
+        'RT': '',
+        'Nama Pemilik': '',
+        'No. Rumah': '',
+        ...Object.fromEntries(bulanNames.map((_, i) => [`Bulan ${i + 1}`, ''])),
+        'Total Bayar': '',
+      })
+    })
+
+    const yearlySheet = XLSX.utils.json_to_sheet(yearlyRows)
+    yearlySheet['!cols'] = [
+      { wch: 22 },
+      { wch: 24 },
+      { wch: 14 },
+      ...Array(12).fill({ wch: 12 }),
+      { wch: 16 },
+    ]
+
+    XLSX.utils.book_append_sheet(workbook, yearlySheet, `Rekap Tahunan ${tahun}`)
+  }
 
   // Nama file
   const dateLabel = filterDate || 'semua-tanggal'

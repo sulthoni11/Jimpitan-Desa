@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/utils/supabase/client'
 import dynamic from 'next/dynamic'
-import { Printer, QrCode, Filter, Home, RefreshCw, LogOut } from 'lucide-react'
+import { Printer, QrCode, Filter, Home, RefreshCw, LogOut, Search } from 'lucide-react'
 
 // Dynamic import QRCode agar hanya dirender di browser
 const QRCode = dynamic(() => import('react-qr-code').then(m => m.default), { ssr: false })
@@ -23,6 +23,7 @@ export default function QrCodePage() {
   const [loading, setLoading] = useState(true)
   const [rumahList, setRumahList] = useState<Rumah[]>([])
   const [filterRt, setFilterRt] = useState<string>('Semua')
+  const [searchQuery, setSearchQuery] = useState<string>('')
   const [error, setError] = useState<string | null>(null)
 
   // Cek login
@@ -54,10 +55,16 @@ export default function QrCodePage() {
     fetchRumah()
   }, [supabase])
 
-  // Filter rumah berdasarkan RT
-  const filteredRumah = filterRt === 'Semua'
-    ? rumahList
-    : rumahList.filter(r => r.rt === filterRt)
+  // Filter rumah berdasarkan RT + pencarian nama/no rumah
+  const filteredRumah = rumahList.filter(r => {
+    const matchRt = filterRt === 'Semua' || r.rt === filterRt
+    const q = searchQuery.toLowerCase().trim()
+    const matchSearch = !q ||
+      r.nama_pemilik.toLowerCase().includes(q) ||
+      r.no_rumah.toLowerCase().includes(q) ||
+      r.id.toLowerCase().includes(q)
+    return matchRt && matchSearch
+  })
 
   // Handle logout
   const handleLogout = async () => {
@@ -118,6 +125,25 @@ export default function QrCodePage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Filter size={16} color="var(--accent)" />
             <h3 style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>Filter & Cetak</h3>
+          </div>
+
+          {/* Pencarian */}
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label className="form-label" style={{ fontSize: '0.75rem' }}>Cari Rumah</label>
+            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+              <Search size={16} style={{
+                position: 'absolute', left: '14px', top: '50%',
+                transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none'
+              }} />
+              <input
+                type="text"
+                placeholder="Cari nama pemilik, no rumah, atau ID..."
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                className="form-input"
+                style={{ paddingLeft: '40px', width: '100%', fontSize: '0.9rem' }}
+              />
+            </div>
           </div>
 
           {/* Select RT */}
