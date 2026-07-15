@@ -1,8 +1,28 @@
-import { type NextRequest } from 'next/server'
-import { updateSession } from '@/utils/supabase/middleware'
+import { type NextRequest, NextResponse } from 'next/server'
+import { parseSessionCookie } from '@/utils/auth'
 
 export async function proxy(request: NextRequest) {
-  return await updateSession(request)
+  const url = request.nextUrl.clone()
+  const isLoginPage = url.pathname === '/login'
+  const isAuthApi = url.pathname.startsWith('/api/auth/')
+  const isStaticFile = 
+    url.pathname.includes('.') || 
+    url.pathname.startsWith('/_next') || 
+    url.pathname === '/favicon.ico'
+
+  if (isStaticFile || isLoginPage || isAuthApi) {
+    return NextResponse.next()
+  }
+
+  const sessionCookie = request.cookies.get('jimpitan_session')?.value
+  const session = sessionCookie ? parseSessionCookie(sessionCookie) : null
+
+  if (!session) {
+    url.pathname = '/login'
+    return NextResponse.redirect(url)
+  }
+
+  return NextResponse.next()
 }
 
 export const config = {

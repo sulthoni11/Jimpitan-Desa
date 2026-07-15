@@ -2,11 +2,9 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/utils/supabase/client'
 import dynamic from 'next/dynamic'
 import { Printer, QrCode, Filter, Home, RefreshCw, LogOut, Search } from 'lucide-react'
 
-// Dynamic import QRCode agar hanya dirender di browser
 const QRCode = dynamic(() => import('react-qr-code').then(m => m.default), { ssr: false })
 
 interface Rumah {
@@ -18,7 +16,6 @@ interface Rumah {
 
 export default function QrCodePage() {
   const router = useRouter()
-  const supabase = createClient()
 
   const [loading, setLoading] = useState(true)
   const [rumahList, setRumahList] = useState<Rumah[]>([])
@@ -26,36 +23,34 @@ export default function QrCodePage() {
   const [searchQuery, setSearchQuery] = useState<string>('')
   const [error, setError] = useState<string | null>(null)
 
-  // Cek login
   useEffect(() => {
-    const checkUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) router.push('/login')
+    const checkAuth = async () => {
+      try {
+        const res = await fetch('/api/auth/me')
+        if (!res.ok) { router.push('/login'); return }
+      } catch {
+        router.push('/login')
+      }
     }
-    checkUser()
-  }, [supabase, router])
+    checkAuth()
+  }, [router])
 
-  // Ambil data semua rumah
   useEffect(() => {
     const fetchRumah = async () => {
       setLoading(true)
-      const { data, error: err } = await supabase
-        .from('rumah')
-        .select('*')
-        .order('rt')
-        .order('no_rumah')
-
-      if (err) {
-        setError('Gagal memuat data rumah.')
-      } else {
+      try {
+        const res = await fetch('/api/rumah')
+        if (!res.ok) throw new Error('Gagal memuat data')
+        const data = await res.json()
         setRumahList(data || [])
+      } catch {
+        setError('Gagal memuat data rumah.')
       }
       setLoading(false)
     }
     fetchRumah()
-  }, [supabase])
+  }, [])
 
-  // Filter rumah berdasarkan RT + pencarian nama/no rumah
   const filteredRumah = rumahList.filter(r => {
     const matchRt = filterRt === 'Semua' || r.rt === filterRt
     const q = searchQuery.toLowerCase().trim()
@@ -66,23 +61,19 @@ export default function QrCodePage() {
     return matchRt && matchSearch
   })
 
-  // Handle logout
   const handleLogout = async () => {
-    await supabase.auth.signOut()
+    await fetch('/api/auth/logout', { method: 'POST' })
     router.push('/login')
   }
 
-  // Cetak QR Code: membuka window print browser
   const handlePrint = () => {
     window.print()
   }
 
   return (
     <>
-      {/* CSS khusus untuk halaman cetak (print) */}
       <style>{`
         @media print {
-          /* Sembunyikan semua UI kecuali grid QR Code */
           .no-print { display: none !important; }
           .app-container { padding: 0 !important; background: white !important; }
           .print-grid {
@@ -104,7 +95,6 @@ export default function QrCodePage() {
         }
       `}</style>
 
-      {/* Header — disembunyikan saat cetak */}
       <header className="app-header no-print">
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <QrCode size={20} color="var(--accent)" />
@@ -120,14 +110,12 @@ export default function QrCodePage() {
 
       <main className="app-content animate-fade-in" style={{ paddingBottom: '30px' }}>
 
-        {/* Panel Kontrol — disembunyikan saat cetak */}
         <div className="glass-card no-print" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Filter size={16} color="var(--accent)" />
             <h3 style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>Filter & Cetak</h3>
           </div>
 
-          {/* Pencarian */}
           <div className="form-group" style={{ marginBottom: 0 }}>
             <label className="form-label" style={{ fontSize: '0.75rem' }}>Cari Rumah</label>
             <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
@@ -146,7 +134,6 @@ export default function QrCodePage() {
             </div>
           </div>
 
-          {/* Select RT */}
           <div className="form-group" style={{ marginBottom: 0 }}>
             <label className="form-label" style={{ fontSize: '0.75rem' }}>Tampilkan RT</label>
             <select
@@ -163,7 +150,6 @@ export default function QrCodePage() {
             </select>
           </div>
 
-          {/* Info jumlah + Tombol Cetak */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <p className="muted" style={{ fontSize: '0.8rem' }}>
               {filteredRumah.length} QR Code siap cetak
@@ -180,14 +166,12 @@ export default function QrCodePage() {
           </div>
         </div>
 
-        {/* Error */}
         {error && (
           <div style={{ padding: '12px 14px', borderRadius: 'var(--border-radius-md)', background: 'var(--danger-light)', color: 'var(--danger)', fontSize: '0.875rem' }}>
             {error}
           </div>
         )}
 
-        {/* Loading */}
         {loading && (
           <div className="text-center muted no-print" style={{ padding: '40px 0' }}>
             <RefreshCw className="animate-spin" size={24} style={{ margin: '0 auto 10px auto', color: 'var(--accent)' }} />
@@ -195,7 +179,6 @@ export default function QrCodePage() {
           </div>
         )}
 
-        {/* Grid QR Code — tampil di layar & saat cetak */}
         {!loading && (
           <div className="print-grid" style={{
             display: 'grid',
@@ -216,7 +199,6 @@ export default function QrCodePage() {
                   cursor: 'default'
                 }}
               >
-                {/* QR Code SVG */}
                 <div style={{
                   padding: '8px',
                   background: 'white',
@@ -232,7 +214,6 @@ export default function QrCodePage() {
                   />
                 </div>
 
-                {/* Info Rumah */}
                 <div style={{ width: '100%' }}>
                   <p className="bold" style={{ fontSize: '0.85rem', color: 'var(--text-primary)', marginBottom: '2px' }}>
                     {rumah.rt} — {rumah.no_rumah}

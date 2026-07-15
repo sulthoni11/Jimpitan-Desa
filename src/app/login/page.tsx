@@ -2,17 +2,15 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/utils/supabase/client'
-import { Mail, Lock, LogIn, AlertCircle } from 'lucide-react'
+import { Lock, User, LogIn, AlertCircle } from 'lucide-react'
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('')
+  const [namaPetugas, setNamaPetugas] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   
   const router = useRouter()
-  const supabase = createClient()
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -20,13 +18,16 @@ export default function LoginPage() {
     setError(null)
 
     try {
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password, nama_petugas: namaPetugas.trim() }),
       })
 
-      if (signInError) {
-        throw new Error(signInError.message)
+      const data = await res.json()
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Gagal login.')
       }
 
       router.push('/')
@@ -42,7 +43,6 @@ export default function LoginPage() {
     <main style={{ display: 'flex', flexDirection: 'column', flex: 1, justifyContent: 'center', minHeight: '100vh' }}>
       <div className="app-content animate-fade-in" style={{ justifyContent: 'center' }}>
         
-        {/* Header/Logo */}
         <div className="text-center mb-4">
           <div style={{
             display: 'inline-flex',
@@ -63,11 +63,9 @@ export default function LoginPage() {
           </p>
         </div>
 
-        {/* Card Form */}
         <div className="glass-card">
           <form onSubmit={handleLogin}>
             
-            {/* Error Message */}
             {error && (
               <div style={{
                 display: 'flex',
@@ -86,26 +84,24 @@ export default function LoginPage() {
               </div>
             )}
 
-            {/* Email Field */}
             <div className="form-group">
-              <label className="form-label" htmlFor="email">
+              <label className="form-label" htmlFor="nama_petugas">
                 <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <Mail size={14} /> Email Petugas
+                  <User size={14} /> Nama Petugas
                 </span>
               </label>
               <input
-                id="email"
-                type="email"
-                placeholder="petugas1@jimpitan.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                id="nama_petugas"
+                type="text"
+                placeholder="Nama lengkap petugas"
+                value={namaPetugas}
+                onChange={(e) => setNamaPetugas(e.target.value)}
                 className="form-input"
                 required
                 disabled={loading}
               />
             </div>
 
-            {/* Password Field */}
             <div className="form-group">
               <label className="form-label" htmlFor="password">
                 <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -124,7 +120,6 @@ export default function LoginPage() {
               />
             </div>
 
-            {/* Submit Button */}
             <button
               type="submit"
               className="btn btn-primary w-full mt-4"
@@ -135,9 +130,8 @@ export default function LoginPage() {
           </form>
         </div>
 
-        {/* Footer Info */}
         <div className="text-center muted" style={{ fontSize: '0.75rem', marginTop: '16px' }}>
-          Aplikasi Jimpitan RT v1.0.0 &bull; Supabase & Next.js
+          Aplikasi Jimpitan RT v1.0.0 &bull; Google Sheets
         </div>
 
       </div>

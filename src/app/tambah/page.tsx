@@ -2,20 +2,18 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/utils/supabase/client'
 import dynamic from 'next/dynamic'
 import {
-  UserPlus, MapPin, User, CheckCircle2, AlertCircle,
-  RefreshCw, LogOut, QrCode
+  UserPlus, User, CheckCircle2, AlertCircle,
+  LogOut, QrCode
 } from 'lucide-react'
 
 const QRCode = dynamic(() => import('react-qr-code').then(m => m.default), { ssr: false })
 
 export default function TambahWargaPage() {
   const router = useRouter()
-  const supabase = createClient()
 
-  const [petugas, setPetugas] = useState<any>(null)
+  const [petugas, setPetugas] = useState<string | null>(null)
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null)
   const [rt, setRt] = useState('RT 01')
   const [noRumah, setNoRumah] = useState('')
@@ -25,17 +23,19 @@ export default function TambahWargaPage() {
   const [success, setSuccess] = useState<{ id: string; rt: string; no_rumah: string; nama_pemilik: string } | null>(null)
 
   useEffect(() => {
-    const fetchUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) router.push('/login')
-      else {
-        setPetugas(user)
-        const email = user.email?.toLowerCase() || ''
-        setIsAuthorized(email === 'petugas1@jimpitan.com' || email === 'maryonotoha@gmail.com')
+    const checkAuth = async () => {
+      try {
+        const res = await fetch('/api/auth/me')
+        if (!res.ok) { router.push('/login'); return }
+        const data = await res.json()
+        setPetugas(data.nama)
+        setIsAuthorized(true)
+      } catch {
+        router.push('/login')
       }
     }
-    fetchUser()
-  }, [supabase, router])
+    checkAuth()
+  }, [router])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -74,7 +74,7 @@ export default function TambahWargaPage() {
   }
 
   const handleLogout = async () => {
-    await supabase.auth.signOut()
+    await fetch('/api/auth/logout', { method: 'POST' })
     router.push('/login')
     router.refresh()
   }
@@ -104,23 +104,6 @@ export default function TambahWargaPage() {
           }}>
             <AlertCircle size={18} />
             <span>{error}</span>
-          </div>
-        )}
-
-        {isAuthorized === false && (
-          <div className="glass-card text-center" style={{ padding: '40px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
-            <div style={{
-              width: '64px', height: '64px', borderRadius: '50%',
-              background: 'var(--danger-light)', border: '2px solid var(--danger)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center'
-            }}>
-              <AlertCircle size={32} color="var(--danger)" />
-            </div>
-            <h2 style={{ color: 'var(--danger)' }}>Akses Dibatasi</h2>
-            <p className="muted">
-              Fitur tambah warga hanya untuk petugas tertentu.
-              <br />Hubungi admin jika perlu akses.
-            </p>
           </div>
         )}
 

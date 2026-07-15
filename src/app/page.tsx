@@ -2,9 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/utils/supabase/client'
 import { 
-  LayoutDashboard, Coins, Home, CheckCircle2, 
+  Coins, Home, CheckCircle2, 
   Clock, RefreshCw, LogOut, ArrowRight, User, AlertCircle
 } from 'lucide-react'
 import Link from 'next/link'
@@ -25,10 +24,8 @@ interface RtStats {
 
 export default function DashboardPage() {
   const router = useRouter()
-  const supabase = createClient()
 
-  // State
-  const [petugas, setPetugas] = useState<any>(null)
+  const [petugas, setPetugas] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [summary, setSummary] = useState<SummaryStats>({
@@ -41,20 +38,20 @@ export default function DashboardPage() {
   const [recentScans, setRecentScans] = useState<any[]>([])
   const [error, setError] = useState<string | null>(null)
 
-  // Ambil data petugas yang login
   useEffect(() => {
-    const fetchUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (user) {
-        setPetugas(user)
-      } else {
+    const checkAuth = async () => {
+      try {
+        const res = await fetch('/api/auth/me')
+        if (!res.ok) { router.push('/login'); return }
+        const data = await res.json()
+        setPetugas(data.nama)
+      } catch {
         router.push('/login')
       }
     }
-    fetchUser()
-  }, [supabase, router])
+    checkAuth()
+  }, [router])
 
-  // Fungsi untuk memuat data statistik dashboard
   const fetchDashboardData = useCallback(async () => {
     setError(null)
     const now = new Date()
@@ -62,79 +59,50 @@ export default function DashboardPage() {
     const currentYear = now.getFullYear()
 
     try {
-      // 1. Ambil data semua rumah untuk dasar perhitungan
-      const { data: allHouses, error: housesError } = await supabase
-        .from('rumah')
-        .select('id, rt, no_rumah, nama_pemilik')
+      const [rumahRes, bayarRes] = await Promise.all([
+        fetch('/api/rumah'),
+        fetch(`/api/pembayaran?bulan=${currentMonth}&tahun=${currentYear}`),
+      ])
 
-      if (housesError) throw housesError
-      const houses = allHouses || []
+      if (!rumahRes.ok || !bayarRes.ok) throw new Error('Gagal memuat data')
 
-      // 2. Ambil data pembayaran bulan ini
-      const { data: bulanIni, error: payError } = await supabase
-        .from('pembayaran')
-        .select('id, rumah_id, nominal, created_at')
-        .eq('bulan', currentMonth)
-        .eq('tahun', currentYear)
+      const houses: any[] = await rumahRes.json()
+      const payments: any[] = await bayarRes.json()
 
-      if (payError) throw payError
-      const payments = (bulanIni as any[]) || []
-
-      // Map rumah_id ke pembayaran
       const paidHouseIds = new Set(payments.map(p => p.rumah_id))
 
-      // 3. Hitung Ringkasan Utama (Summary Stats)
       const totalAmount = payments.reduce((sum, p) => sum + Number(p.nominal), 0)
-
       const totalHouses = houses.length
       const scannedHouses = paidHouseIds.size
       const unscannedHouses = Math.max(0, totalHouses - scannedHouses)
 
-      setSummary({
-        totalAmount,
-        totalHouses,
-        scannedHouses,
-        unscannedHouses
-      })
+      setSummary({ totalAmount, totalHouses, scannedHouses, unscannedHouses })
 
-      // 4. Hitung Statistik per RT (RT 01 sampai RT 04)
       const rts = ['RT 01', 'RT 02', 'RT 03', 'RT 04']
       const calculatedRtSummary: RtStats[] = rts.map(rt => {
         const rtHouses = houses.filter(h => h.rt === rt)
         const rtHouseIds = rtHouses.map(h => h.id)
-
         const rtPayments = payments.filter(p => rtHouseIds.includes(p.rumah_id))
         const rtAmount = rtPayments.reduce((sum, p) => sum + Number(p.nominal), 0)
-
-        return {
-          rt,
-          amount: rtAmount,
-          totalHouses: rtHouses.length,
-          scannedHouses: rtPayments.length
-        }
+        return { rt, amount: rtAmount, totalHouses: rtHouses.length, scannedHouses: rtPayments.length }
       })
 
       setRtSummary(calculatedRtSummary)
 
-      // 5. Aktivitas Pembayaran Terbaru (Limit 5)
       const sortedPayments = [...payments].sort(
         (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       )
-
-      // Gabungkan dengan data rumah
       const recentScansWithRumah = sortedPayments.slice(0, 5).map(p => {
         const rumah = houses.find(h => h.id === p.rumah_id)
         return { ...p, rumah }
       })
       setRecentScans(recentScansWithRumah)
-
     } catch (err: any) {
       console.error('Error fetching dashboard data:', err)
       setError('Gagal memuat rekap pembayaran.')
     }
-  }, [supabase])
+  }, [])
 
-  // Muat data awal saat halaman diakses
   useEffect(() => {
     if (petugas) {
       setLoading(true)
@@ -142,27 +110,23 @@ export default function DashboardPage() {
     }
   }, [petugas, fetchDashboardData])
 
-  // Fungsi reload manual
   const handleRefresh = async () => {
     setRefreshing(true)
     await fetchDashboardData()
     setRefreshing(false)
   }
 
-  // Handle logout
   const handleLogout = async () => {
-    await supabase.auth.signOut()
+    await fetch('/api/auth/logout', { method: 'POST' })
     router.push('/login')
     router.refresh()
   }
 
-  // Hitung persentase total progress
   const getProgressPercentage = () => {
     if (summary.totalHouses === 0) return 0
     return Math.round((summary.scannedHouses / summary.totalHouses) * 100)
   }
 
-  // Dapatkan tanggal hari ini terformat
   const getTodayFormatted = () => {
     const options: Intl.DateTimeFormatOptions = { weekday: 'long', day: 'numeric', month: 'short' }
     return new Date().toLocaleDateString('id-ID', options)
@@ -181,7 +145,6 @@ export default function DashboardPage() {
 
   return (
     <>
-      {/* Header Halaman */}
       <header className="app-header">
         <div>
           <p className="muted" style={{ fontSize: '0.75rem', fontWeight: 600 }}>{getTodayFormatted().toUpperCase()}</p>
@@ -223,10 +186,8 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      {/* Konten Utama */}
       <main className="app-content animate-fade-in" style={{ paddingBottom: '30px' }}>
         
-        {/* Error Alert */}
         {error && (
           <div style={{
             display: 'flex',
@@ -244,7 +205,6 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* Info Periode Pembayaran */}
         {(() => {
           const tgl = new Date().getDate()
           const dalamPeriode = tgl >= 1 && tgl <= 15
@@ -278,7 +238,6 @@ export default function DashboardPage() {
           )
         })()}
 
-        {/* Card Ringkasan Rupiah */}
         <div className="glass-card" style={{
           background: 'linear-gradient(135deg, rgba(124, 58, 237, 0.15) 0%, rgba(18, 24, 41, 0.8) 100%)',
           borderColor: 'rgba(124, 58, 237, 0.3)',
@@ -311,7 +270,6 @@ export default function DashboardPage() {
           </p>
         </div>
 
-        {/* Card Progress Rumah */}
         <div className="glass-card">
           <div className="flex-space mb-4">
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -323,7 +281,6 @@ export default function DashboardPage() {
             </span>
           </div>
 
-          {/* Progress Bar */}
           <div style={{
             width: '100%',
             height: '10px',
@@ -347,7 +304,6 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Rincian per RT */}
         <div>
           <h3 className="mb-4" style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
             Rincian RT Hari Ini
@@ -383,7 +339,6 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Scan Button CTA */}
         <Link href="/scan" className="btn btn-primary" style={{
           textDecoration: 'none',
           justifyContent: 'center',
@@ -393,7 +348,6 @@ export default function DashboardPage() {
           Mulai Tagih Bulan Ini <ArrowRight size={18} />
         </Link>
 
-        {/* Pencatatan Terbaru */}
         <div className="glass-card">
           <h3 className="mb-4" style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
             Pembayaran Bulan Ini
@@ -444,11 +398,10 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Petugas Login Info */}
         {petugas && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
             <User size={12} />
-            <span>Petugas: {petugas.email}</span>
+            <span>Petugas: {petugas}</span>
           </div>
         )}
 

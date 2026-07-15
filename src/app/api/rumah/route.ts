@@ -1,61 +1,56 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createAdminClient } from '@/utils/supabase/admin'
-import { createClient } from '@/utils/supabase/server'
+import { getSheetRows, appendSheetRows } from '@/utils/googleSheets'
+import { getSession } from '@/utils/auth'
+
+export async function GET() {
+  try {
+    const { rows } = await getSheetRows('rumah')
+    const houses = rows.map(r => ({
+      id: r.id,
+      rt: r.rt,
+      no_rumah: r.no_rumah,
+      nama_pemilik: r.nama_pemilik,
+      created_at: r.created_at,
+    }))
+    return NextResponse.json(houses)
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message || 'Gagal memuat data rumah.' }, { status: 500 })
+  }
+}
 
 export async function POST(request: NextRequest) {
   try {
-    // Validasi: hanya petugas yang sudah login bisa akses
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
+    const session = await getSession()
+    if (!session) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Hanya petugas tertentu yang bisa tambah warga
-    const email = user.email?.toLowerCase() || ''
-    if (email !== 'petugas1@jimpitan.com' && email !== 'maryonotoha@gmail.com') {
-      return NextResponse.json({ error: 'Anda tidak memiliki izin untuk menambah warga.' }, { status: 403 })
-    }
-
     const { rt, no_rumah, nama_pemilik } = await request.json()
-
     if (!rt || !no_rumah || !nama_pemilik) {
       return NextResponse.json({ error: 'Semua field harus diisi' }, { status: 400 })
     }
 
-    const admin = createAdminClient()
+    const { rows } = await getSheetRows('rumah')
     const rtNumber = rt.replace('RT ', '')
     const prefix = `RMH-${rtNumber}-`
 
-    const { data: lastHouse } = await admin
-      .from('rumah')
-      .select('id')
-      .like('id', `${prefix}%`)
-      .order('id', { ascending: false })
-      .limit(1)
+    const existingIds = rows
+      .filter(r => r.id.startsWith(prefix))
+      .map(r => parseInt(r.id.slice(-3), 10))
+      .sort((a, b) => b - a)
 
-    let newId: string
-    if (!lastHouse || lastHouse.length === 0) {
-      newId = `${prefix}001`
-    } else {
-      const lastSeq = parseInt(lastHouse[0].id.slice(-3), 10)
-      const nextSeq = (lastSeq + 1).toString().padStart(3, '0')
-      newId = `${prefix}${nextSeq}`
-    }
+    const newSeq = existingIds.length > 0 ? existingIds[0] + 1 : 1
+    const newId = `${prefix}${newSeq.toString().padStart(3, '0')}`
 
-    const { data, error } = await admin
-      .from('rumah')
-      .insert({
-        id: newId,
-        rt,
-        no_rumah: no_rumah.trim(),
-        nama_pemilik: nama_pemilik.trim(),
-      })
-      .select()
-      .single()
+    const now = new Date().toISOString()
+    await appendSheetRows('rumah', [[newId, rt, no_rumah.trim(), nama_pemilik.trim(), now]])
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
+    const data = {
+      id: newId,
+      rt,
+      no_rumah: no_rumah.trim(),
+      nama_pemilik: nama_pemilik.trim(),
+      created_at: now,
     }
 
     return NextResponse.json({ data }, { status: 201 })

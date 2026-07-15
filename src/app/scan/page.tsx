@@ -2,15 +2,12 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/utils/supabase/client'
 import dynamic from 'next/dynamic'
 import { 
   Camera, MapPin, User, Calendar,
   CheckCircle2, AlertCircle, RefreshCw, LogOut, ArrowLeft 
 } from 'lucide-react'
 
-// Dynamic import agar html5-qrcode HANYA dimuat di browser (tidak di server)
-// Ini wajib dilakukan karena library kamera tidak bisa dijalankan di server-side
 const QrScanner = dynamic(() => import('@/components/QrScanner'), {
   ssr: false,
   loading: () => (
@@ -36,21 +33,16 @@ const QrScanner = dynamic(() => import('@/components/QrScanner'), {
 
 export default function ScanPage() {
   const router = useRouter()
-  const supabase = createClient()
 
-  // State
-  const [petugas, setPetugas] = useState<any>(null)
+  const [petugas, setPetugas] = useState<string | null>(null)
   const [step, setStep] = useState<'scan' | 'form' | 'success'>('scan')
   const [rumahId, setRumahId] = useState<string>('')
   const [rumahData, setRumahData] = useState<any>(null)
   const [paymentStatus, setPaymentStatus] = useState<any>(null)
   const [nominal, setNominal] = useState<number>(10000)
   const [result, setResult] = useState<any>(null)
-  // scanKey dipakai sebagai React key pada QrScanner agar
-  // komponen dihancurkan & dibuat ulang setiap kali scan baru dimulai
   const [scanKey, setScanKey] = useState(0)
 
-  // State untuk input manual (fallback jika scan gagal)
   const [manualMode, setManualMode] = useState(false)
   const [manualRt, setManualRt] = useState('RT 01')
   const [manualNo, setManualNo] = useState('')
@@ -58,20 +50,20 @@ export default function ScanPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Ambil data petugas yang sedang login
   useEffect(() => {
-    const fetchUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (user) {
-        setPetugas(user)
-      } else {
+    const checkAuth = async () => {
+      try {
+        const res = await fetch('/api/auth/me')
+        if (!res.ok) { router.push('/login'); return }
+        const data = await res.json()
+        setPetugas(data.nama)
+      } catch {
         router.push('/login')
       }
     }
-    fetchUser()
-  }, [supabase, router])
+    checkAuth()
+  }, [router])
 
-  // Ambil data rumah setelah scan berhasil + cek status pembayaran
   const goToForm = async (data: any) => {
     setRumahData(data)
     setRumahId(data.id)
@@ -92,13 +84,11 @@ export default function ScanPage() {
     setError(null)
     
     try {
-      const { data, error: fetchError } = await supabase
-        .from('rumah')
-        .select('*')
-        .eq('id', decodedText)
-        .single()
+      const res = await fetch(`/api/rumah`)
+      const houses: any[] = await res.json()
+      const data = houses.find(h => h.id === decodedText)
 
-      if (fetchError || !data) {
+      if (!data) {
         throw new Error('Data rumah tidak ditemukan. Pastikan QR Code valid.')
       }
 
@@ -110,7 +100,6 @@ export default function ScanPage() {
     }
   }
 
-  // Cari rumah via input manual (fallback jika scan gagal)
   const handleManualSearch = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!manualNo.trim()) return
@@ -123,13 +112,11 @@ export default function ScanPage() {
     const constructedId = `RMH-${rtNumber}-${houseNumber}`
 
     try {
-      const { data, error: fetchError } = await supabase
-        .from('rumah')
-        .select('*')
-        .eq('id', constructedId)
-        .single()
+      const res = await fetch(`/api/rumah`)
+      const houses: any[] = await res.json()
+      const data = houses.find(h => h.id === constructedId)
 
-      if (fetchError || !data) {
+      if (!data) {
         throw new Error(`Rumah dengan ID "${constructedId}" tidak ditemukan. Pastikan RT dan nomor rumah benar.`)
       }
 
@@ -143,14 +130,12 @@ export default function ScanPage() {
     }
   }
 
-  // Handle logout
   const handleLogout = async () => {
-    await supabase.auth.signOut()
+    await fetch('/api/auth/logout', { method: 'POST' })
     router.push('/login')
     router.refresh()
   }
 
-  // Handle pembayaran (via API route)
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!petugas || !rumahId) return
@@ -181,8 +166,6 @@ export default function ScanPage() {
     }
   }
 
-  // Reset state untuk scan ulang
-  // setScanKey memaksa QrScanner di-unmount & remount total (reinisialisasi kamera)
   const handleReset = () => {
     setStep('scan')
     setRumahId('')
@@ -194,10 +177,9 @@ export default function ScanPage() {
     setManualMode(false)
     setManualRt('RT 01')
     setManualNo('')
-    setScanKey(prev => prev + 1) // Paksa kamera diinisialisasi ulang
+    setScanKey(prev => prev + 1)
   }
 
-  // Dapatkan tanggal hari ini terformat
   const getTodayFormatted = () => {
     const options: Intl.DateTimeFormatOptions = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }
     return new Date().toLocaleDateString('id-ID', options)
@@ -205,7 +187,6 @@ export default function ScanPage() {
 
   return (
     <>
-      {/* Header Halaman */}
       <header className="app-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           {step === 'form' && (
@@ -243,10 +224,8 @@ export default function ScanPage() {
         )}
       </header>
 
-      {/* Konten Halaman */}
       <main className="app-content animate-fade-in">
 
-        {/* STEP 1: SCAN QR CODE / INPUT MANUAL */}
         {step === 'scan' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
 
@@ -356,7 +335,6 @@ export default function ScanPage() {
                   Arahkan kamera ke QR Code rumah warga untuk melakukan pencatatan jimpitan hari ini.
                 </p>
                 
-                {/* Box Scanner — key berubah setiap reset, memaksa remount penuh */}
                 {!error && <QrScanner key={scanKey} onScanSuccess={handleScanSuccess} />}
 
                 {error && (
@@ -399,7 +377,6 @@ export default function ScanPage() {
               )}
             </button>
 
-            {/* Info Petugas Aktif */}
             {petugas && (
               <div className="glass-card" style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '14px 20px' }}>
                 <div style={{
@@ -415,18 +392,16 @@ export default function ScanPage() {
                 </div>
                 <div>
                   <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 500 }}>PETUGAS AKTIF</p>
-                  <p className="bold" style={{ fontSize: '0.875rem' }}>{petugas.email}</p>
+                  <p className="bold" style={{ fontSize: '0.875rem' }}>{petugas}</p>
                 </div>
               </div>
             )}
           </div>
         )}
 
-        {/* STEP 2: FORM PEMBAYARAN */}
         {step === 'form' && rumahData && (
           <form onSubmit={handleSubmit} className="glass-card animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             
-            {/* Info Rumah Warga */}
             <div style={{
               background: 'rgba(255, 255, 255, 0.03)',
               borderRadius: 'var(--border-radius-md)',
@@ -450,7 +425,6 @@ export default function ScanPage() {
               </div>
             </div>
 
-            {/* Info Periode Pembayaran */}
             {(() => {
               const tgl = new Date().getDate()
               const dalamPeriode = tgl >= 1 && tgl <= 15
@@ -478,7 +452,6 @@ export default function ScanPage() {
               )
             })()}
 
-            {/* Status Pembayaran */}
             {paymentStatus && (
               <div style={{
                 background: paymentStatus.sudahBayarBulanIni && paymentStatus.tunggakan.length === 0
@@ -523,7 +496,6 @@ export default function ScanPage() {
               </div>
             )}
 
-            {/* Info Tanggal */}
             <div className="form-group">
               <label className="form-label">Tanggal Pembayaran</label>
               <div style={{
@@ -542,7 +514,6 @@ export default function ScanPage() {
               </div>
             </div>
 
-            {/* Nominal Pembayaran */}
             <div className="form-group animate-fade-in">
               <label className="form-label" htmlFor="nominal">
                 Nominal Pembayaran (Rp)
@@ -579,7 +550,6 @@ export default function ScanPage() {
               )}
             </div>
 
-            {/* Error Message */}
             {error && (
               <div style={{
                 display: 'flex',
@@ -597,7 +567,6 @@ export default function ScanPage() {
               </div>
             )}
 
-            {/* Submit Button */}
             <div className="flex-row mt-4">
               <button 
                 type="button" 
@@ -620,7 +589,6 @@ export default function ScanPage() {
           </form>
         )}
 
-        {/* STEP 3: SUCCESS FEEDBACK */}
         {step === 'success' && result && (
           <div className="glass-card text-center animate-fade-in" style={{ padding: '40px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px' }}>
             <div style={{

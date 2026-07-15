@@ -2,77 +2,54 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/utils/supabase/client'
 import { exportJimpitanToExcel } from '@/utils/exportExcel'
 import { 
-  History, Calendar, Filter, FileText, 
-  Coins, Search, RefreshCw, LogOut, ArrowLeft, User, AlertCircle, FileDown
+  Filter, FileText, 
+  RefreshCw, LogOut, User, AlertCircle, FileDown
 } from 'lucide-react'
 
 export default function RiwayatPage() {
   const router = useRouter()
-  const supabase = createClient()
 
-  // State
-  const [petugas, setPetugas] = useState<any>(null)
+  const [petugas, setPetugas] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [exporting, setExporting] = useState(false)
   const [records, setRecords] = useState<any[]>([])
   const [filteredRecords, setFilteredRecords] = useState<any[]>([])
   const [error, setError] = useState<string | null>(null)
 
-  // Filter States
   const now = new Date()
   const [filterBulan, setFilterBulan] = useState<number>(now.getMonth() + 1)
   const [filterTahun, setFilterTahun] = useState<number>(now.getFullYear())
   const [filterRt, setFilterRt] = useState<string>('Semua')
 
-  // Ambil data petugas yang login
   useEffect(() => {
-    const fetchUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (user) {
-        setPetugas(user)
-      } else {
+    const checkAuth = async () => {
+      try {
+        const res = await fetch('/api/auth/me')
+        if (!res.ok) { router.push('/login'); return }
+        const data = await res.json()
+        setPetugas(data.nama)
+      } catch {
         router.push('/login')
       }
     }
-    fetchUser()
-  }, [supabase, router])
+    checkAuth()
+  }, [router])
 
   const bulanNames = [
     'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
     'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
   ]
 
-  // Fungsi untuk mengambil data riwayat dari database
   const fetchHistory = useCallback(async () => {
     setLoading(true)
     setError(null)
 
     try {
-      const { data, error: fetchError } = await supabase
-        .from('pembayaran')
-        .select(`
-          id,
-          bulan,
-          tahun,
-          nominal,
-          created_at,
-          petugas_id,
-          rumah:rumah_id (
-            id,
-            rt,
-            no_rumah,
-            nama_pemilik
-          )
-        `)
-        .eq('bulan', filterBulan)
-        .eq('tahun', filterTahun)
-        .order('created_at', { ascending: false })
-
-      if (fetchError) throw fetchError
-      
+      const res = await fetch(`/api/pembayaran?bulan=${filterBulan}&tahun=${filterTahun}`)
+      if (!res.ok) throw new Error('Gagal memuat data')
+      const data = await res.json()
       setRecords(data || [])
     } catch (err: any) {
       console.error('Error fetching history:', err)
@@ -80,67 +57,58 @@ export default function RiwayatPage() {
     } finally {
       setLoading(false)
     }
-  }, [supabase, filterBulan, filterTahun])
+  }, [filterBulan, filterTahun])
 
-  // Muat data saat tanggal filter berubah atau petugas terkonfirmasi
   useEffect(() => {
     if (petugas) {
       fetchHistory()
     }
   }, [petugas, fetchHistory])
 
-  // Terapkan filter RT di level Client (JavaScript) agar responsif dan aman dari error join query
   useEffect(() => {
     let result = [...records]
-
     if (filterRt !== 'Semua') {
       result = result.filter(rec => rec.rumah && rec.rumah.rt === filterRt)
     }
-
     setFilteredRecords(result)
   }, [records, filterRt])
 
-  // Hitung ringkasan data terfilter
   const getFilteredSummary = () => {
     const totalCount = filteredRecords.length
-    const totalAmount = filteredRecords
-      .filter(rec => rec.status === 'ada')
-      .reduce((sum, rec) => sum + Number(rec.nominal), 0)
-
-    const countAda = filteredRecords.filter(rec => rec.status === 'ada').length
-    const countTidakAda = totalCount - countAda
-
-    return { totalCount, totalAmount, countAda, countTidakAda }
+    const totalAmount = filteredRecords.reduce((sum, rec) => sum + Number(rec.nominal), 0)
+    return { totalCount, totalAmount }
   }
 
   const summary = getFilteredSummary()
 
-  // Format bulan/tahun untuk tampilan UI
   const formatDisplayDate = () => {
     return `${bulanNames[filterBulan - 1]} ${filterTahun}`
   }
 
-  // Handle export ke Excel
   const handleExport = async () => {
     setExporting(true)
     try {
-      // Ambil semua data rumah
-      const { data: allHouses } = await supabase
-        .from('rumah')
-        .select('id, rt, no_rumah, nama_pemilik')
+      const rumahRes = await fetch('/api/rumah')
+      const allHouses = await rumahRes.json()
 
       if (!allHouses || allHouses.length === 0) return
 
-      // Ambil data pembayaran tahun ini untuk rekap tahunan
       const tahunIni = new Date().getFullYear()
-      const { data: pembayaran } = await supabase
-        .from('pembayaran')
-        .select('*')
-        .eq('tahun', tahunIni)
+      const payRes = await fetch(`/api/pembayaran?tahun=${tahunIni}`)
+      const pembayaran = await payRes.json()
+
+      const mappedRecords = filteredRecords.map(r => ({
+        id: r.id,
+        tanggal: `${r.tahun}-${String(r.bulan).padStart(2, '0')}-01`,
+        nominal: Number(r.nominal),
+        status: 'ada',
+        created_at: r.created_at,
+        rumah: r.rumah,
+      }))
 
       await new Promise(resolve => setTimeout(resolve, 100))
       const dateLabel = `${filterTahun}-${String(filterBulan).padStart(2, '0')}`
-      exportJimpitanToExcel(filteredRecords, allHouses, dateLabel, filterRt, pembayaran || undefined)
+      exportJimpitanToExcel(mappedRecords, allHouses, dateLabel, filterRt, pembayaran || undefined)
     } catch (err) {
       console.error('Gagal mengekspor Excel:', err)
     } finally {
@@ -148,16 +116,14 @@ export default function RiwayatPage() {
     }
   }
 
-  // Handle logout
   const handleLogout = async () => {
-    await supabase.auth.signOut()
+    await fetch('/api/auth/logout', { method: 'POST' })
     router.push('/login')
     router.refresh()
   }
 
   return (
     <>
-      {/* Header Halaman */}
       <header className="app-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <h2>Riwayat Pembayaran</h2>
@@ -182,10 +148,8 @@ export default function RiwayatPage() {
         )}
       </header>
 
-      {/* Konten Halaman */}
       <main className="app-content animate-fade-in" style={{ paddingBottom: '30px' }}>
 
-        {/* Card Filter */}
         <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
             <Filter size={18} color="var(--accent)" />
@@ -193,7 +157,6 @@ export default function RiwayatPage() {
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
-            {/* Select Bulan */}
             <div className="form-group" style={{ marginBottom: 0 }}>
               <label className="form-label" style={{ fontSize: '0.75rem' }}>Bulan</label>
               <select
@@ -208,7 +171,6 @@ export default function RiwayatPage() {
               </select>
             </div>
 
-            {/* Select Tahun */}
             <div className="form-group" style={{ marginBottom: 0 }}>
               <label className="form-label" style={{ fontSize: '0.75rem' }}>Tahun</label>
               <select
@@ -223,7 +185,6 @@ export default function RiwayatPage() {
               </select>
             </div>
 
-            {/* Select RT */}
             <div className="form-group" style={{ marginBottom: 0 }}>
               <label className="form-label" style={{ fontSize: '0.75rem' }}>RT</label>
               <select
@@ -242,7 +203,6 @@ export default function RiwayatPage() {
           </div>
         </div>
 
-        {/* Error Alert */}
         {error && (
           <div style={{
             display: 'flex',
@@ -260,13 +220,7 @@ export default function RiwayatPage() {
           </div>
         )}
 
-        {/* Summary Ringkasan Pencarian */}
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: '1.2fr 1fr',
-          gap: '12px'
-        }}>
-          {/* Card Total Uang */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '12px' }}>
           <div className="glass-card" style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
             <span className="muted" style={{ fontSize: '0.75rem', fontWeight: 600 }}>TERKUMPUL ({filterRt})</span>
             <p className="bold success-text" style={{ fontSize: '1.25rem' }}>
@@ -274,7 +228,6 @@ export default function RiwayatPage() {
             </p>
           </div>
 
-          {/* Card Total Rumah */}
           <div className="glass-card" style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
             <span className="muted" style={{ fontSize: '0.75rem', fontWeight: 600 }}>TOTAL RUMAH</span>
             <p className="bold" style={{ fontSize: '1.25rem', color: 'var(--text-primary)' }}>
@@ -283,7 +236,6 @@ export default function RiwayatPage() {
           </div>
         </div>
 
-        {/* Informasi Detail Filter + Tombol Aksi */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <p className="muted" style={{ fontSize: '0.8rem' }}>
             Menampilkan data untuk: <br />
@@ -292,7 +244,6 @@ export default function RiwayatPage() {
             </span>
           </p>
           <div style={{ display: 'flex', gap: '8px' }}>
-            {/* Tombol Refresh */}
             <button 
               onClick={fetchHistory}
               className="btn btn-secondary"
@@ -303,24 +254,23 @@ export default function RiwayatPage() {
               <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
             </button>
 
-            {/* Tombol Export Excel */}
             <button
               onClick={handleExport}
-                disabled={exporting || loading}
-                title="Export ke Excel"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  padding: '8px 14px',
-                  borderRadius: 'var(--border-radius-md)',
-                  background: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
-                  border: '1px solid rgba(22, 163, 74, 0.4)',
-                  color: '#fff',
-                  fontWeight: 600,
-                  fontSize: '0.8rem',
-                  cursor: 'pointer',
-                  boxShadow: '0 4px 12px rgba(22, 163, 74, 0.3)',
+              disabled={exporting || loading}
+              title="Export ke Excel"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 14px',
+                borderRadius: 'var(--border-radius-md)',
+                background: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)',
+                border: '1px solid rgba(22, 163, 74, 0.4)',
+                color: '#fff',
+                fontWeight: 600,
+                fontSize: '0.8rem',
+                cursor: 'pointer',
+                boxShadow: '0 4px 12px rgba(22, 163, 74, 0.3)',
                 transition: 'var(--transition-fast)',
                 whiteSpace: 'nowrap',
                 height: '36px',
@@ -333,7 +283,6 @@ export default function RiwayatPage() {
           </div>
         </div>
 
-        {/* List Data Riwayat */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           {loading ? (
             <div className="text-center muted" style={{ padding: '40px 0' }}>
@@ -378,7 +327,7 @@ export default function RiwayatPage() {
                     <span>{timeStr} WIB</span>
                     <span>{bulanNames[record.bulan - 1]} {record.tahun}</span>
                     <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <User size={10} /> Petugas
+                      <User size={10} /> {record.petugas}
                     </span>
                   </div>
                 </div>
